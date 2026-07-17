@@ -1,0 +1,37 @@
+# Product Changelog - July 2026
+
+        <div class="feature-card rounded-xl p-6">
+          <div class="flex items-start gap-4">
+            <div class="w-12 h-12 rounded-lg bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+              <span class="text-2xl">🧠</span>
+            </div>
+            <div>
+              <h3 class="text-xl font-semibold text-white mb-2">Agent-first local RAG</h3>
+              <p class="text-white/40 leading-relaxed">Ship a single machin binary that ingest and query text against Qdrant — JSON on stdout, semantic exit codes, <code>help-json</code> discovery. Built for agents, not admin panels.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="feature-card rounded-xl p-6">
+          <div class="flex items-start gap-4">
+            <div class="w-12 h-12 rounded-lg bg-sky-500/10 flex items-center justify-center flex-shrink-0">
+              <span class="text-2xl">💸</span>
+            </div>
+            <div>
+              <h3 class="text-xl font-semibold text-white mb-2">Zero BYOK embeddings</h3>
+              <p class="text-white/40 leading-relaxed">A tiny local hash embedder (<code>hash-sha256-v1</code>, 64-d cosine) means no OpenAI keys and no model downloads. Keyword-ish quality, honest for MVP agent memory and docs.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="feature-card rounded-xl p-6">
+          <div class="flex items-start gap-4">
+            <div class="w-12 h-12 rounded-lg bg-violet-500/10 flex items-center justify-center flex-shrink-0">
+              <span class="text-2xl">📦</span>
+            </div>
+            <div>
+              <h3 class="text-xl font-semibold text-white mb-2">Qdrant + Vue peek UI</h3>
+              <p class="text-white/40 leading-relaxed">Compose brings local Qdrant; <code>serve</code> exposes <code>/api/*</code> plus an embedded Vue 3 CDN UI for humans who want a quick ingest/search console.</p>
+            </div>
+          </div>
+        </div>
