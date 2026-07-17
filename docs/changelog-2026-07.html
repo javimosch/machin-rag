@@ -76,6 +76,18 @@
           </div>
         </div>
 
+        <div class="feature-card rounded-xl p-6">
+          <div class="flex items-start gap-4">
+            <div class="w-12 h-12 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+              <span class="text-2xl">📄</span>
+            </div>
+            <div>
+              <h3 class="text-xl font-semibold text-white mb-2">Structured ingest (v0.2)</h3>
+              <p class="text-white/40 leading-relaxed">Parse <code>md</code>, <code>csv</code>, <code>json</code>, and <code>ndjson</code> into chunks with a declarative normalize template. Config merges <code>~/.machin-rag/config.json</code> → env → CLI.</p>
+            </div>
+          </div>
+        </div>
+
       </div>
 
       <!-- Technical Changelog -->
@@ -87,7 +99,18 @@
             <span>🚀</span> Features
           </h2>
           <ul class="space-y-2 text-slate-300">
+            <li><span class="text-slate-500 text-sm mr-3">[17/07]</span>feat: md/csv/json ingest with config merge and chunk pipeline</li>
             <li><span class="text-slate-500 text-sm mr-3">[17/07]</span>feat: initial machin-rag MVP — agent-first local RAG</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2 class="text-2xl font-semibold text-emerald-400 mb-4 flex items-center gap-2">
+            <span>📚</span> Documentation
+          </h2>
+          <ul class="space-y-2 text-slate-300">
+            <li><span class="text-slate-500 text-sm mr-3">[17/07]</span>docs: remove csv-to-rag references from project copy</li>
+            <li><span class="text-slate-500 text-sm mr-3">[17/07]</span>docs: landing page + July 2026 dual-view changelog</li>
           </ul>
         </section>
         </div>
