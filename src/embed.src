@@ -1,0 +1,63 @@
+// embed.src — tiny local-only embedder (feature hashing over sha256).
+// No BYOK, no model download. Quality is keyword-ish (good enough for MVP
+// agent memory / docs); swap later for an ONNX sidecar behind the same API.
+
+func embed_dim() (d) { d = 64 }
+
+func embed_provider() (p) { p = "hash-sha256-v1" }
+
+// Accumulate a DIM-float bag-of-tokens vector, L2-normalized, as a JSON array.
+func embed_json(text) (j) {
+    dim := embed_dim()
+    v := []float{}
+    i := 0
+    while i < dim {
+        v = append(v, 0.0)
+        i = i + 1
+    }
+
+    norm := to_lower(text)
+    norm = replace(norm, "\n", " ")
+    norm = replace(norm, "\t", " ")
+    toks := split(norm, " ")
+    for _, t := range toks {
+        t = trim(t)
+        if len(t) == 0 { continue }
+        hb := from_hex(sha256(t))
+        idx := byte_at(hb, 0) % dim
+        if idx < 0 { idx = 0 - idx }
+        sign := 1.0
+        if (byte_at(hb, 1) % 2) == 1 { sign = 0.0 - 1.0 }
+        v[idx] = v[idx] + sign
+    }
+
+    // L2 normalize
+    sum := 0.0
+    i = 0
+    while i < dim {
+        sum = sum + v[i] * v[i]
+        i = i + 1
+    }
+    nrm := sqrt(sum)
+    if nrm < 0.0000001 { nrm = 1.0 }
+
+    j = "["
+    i = 0
+    while i < dim {
+        if i > 0 { j = j + "," }
+        j = j + str(v[i] / nrm)
+        i = i + 1
+    }
+    j = j + "]"
+}
+
+// Stable positive int id from content (Qdrant unsigned point id).
+func point_id(text) (id) {
+    hb := from_hex(sha256(text))
+    id = byte_at(hb, 0)
+    id = (id << 8) + byte_at(hb, 1)
+    id = (id << 8) + byte_at(hb, 2)
+    id = (id << 8) + byte_at(hb, 3)
+    if id < 0 { id = 0 - id }
+    if id == 0 { id = 1 }
+}

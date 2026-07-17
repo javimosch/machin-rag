@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>machin-rag</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen">
+<div id="app" class="max-w-3xl mx-auto px-6 py-10">
+  <header class="mb-8">
+    <h1 class="text-3xl font-semibold tracking-tight">
+      <span class="text-emerald-400">machin</span><span class="text-zinc-500">-rag</span>
+    </h1>
+    <p class="text-zinc-400 mt-2 text-sm">Agent-first local RAG · Qdrant · hash embedder (no BYOK)</p>
+  </header>
+
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+    <div class="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
+      <div class="text-[10px] uppercase tracking-wide text-zinc-500">API</div>
+      <div class="text-lg" :class="healthOk ? 'text-emerald-400' : 'text-rose-400'">{{ health }}</div>
+    </div>
+    <div class="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
+      <div class="text-[10px] uppercase tracking-wide text-zinc-500">Qdrant</div>
+      <div class="text-lg" :class="qdrant === 'up' ? 'text-emerald-400' : 'text-amber-400'">{{ qdrant }}</div>
+    </div>
+    <div class="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
+      <div class="text-[10px] uppercase tracking-wide text-zinc-500">Embed</div>
+      <div class="text-sm mt-1 text-zinc-200 truncate">{{ embed }}</div>
+    </div>
+    <div class="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
+      <div class="text-[10px] uppercase tracking-wide text-zinc-500">Dim</div>
+      <div class="text-lg text-sky-300">{{ dim }}</div>
+    </div>
+  </div>
+
+  <section class="mb-8 space-y-3">
+    <label class="block text-xs uppercase tracking-wide text-zinc-500">Collection</label>
+    <input v-model="collection" class="w-full rounded-md bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm" placeholder="docs" />
+  </section>
+
+  <section class="mb-8 space-y-3">
+    <label class="block text-xs uppercase tracking-wide text-zinc-500">Ingest text</label>
+    <textarea v-model="ingestText" rows="4" class="w-full rounded-md bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm font-mono" placeholder="Paste a chunk…"></textarea>
+    <button @click="doIngest" class="rounded-md bg-emerald-600 hover:bg-emerald-500 px-4 py-2 text-sm font-medium">Ingest</button>
+  </section>
+
+  <section class="mb-8 space-y-3">
+    <label class="block text-xs uppercase tracking-wide text-zinc-500">Query</label>
+    <div class="flex gap-2">
+      <input v-model="queryText" class="flex-1 rounded-md bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm" placeholder="search…" @keyup.enter="doQuery" />
+      <button @click="doQuery" class="rounded-md bg-sky-600 hover:bg-sky-500 px-4 py-2 text-sm font-medium">Search</button>
+    </div>
+  </section>
+
+  <pre class="rounded-lg border border-zinc-800 bg-zinc-900/80 p-4 text-xs overflow-auto text-zinc-300 min-h-[8rem]">{{ out }}</pre>
+</div>
+<script>
+const { createApp, ref, onMounted } = Vue
+createApp({
+  setup() {
+    const health = ref('…')
+    const healthOk = ref(false)
+    const qdrant = ref('…')
+    const embed = ref('…')
+    const dim = ref('…')
+    const collection = ref('docs')
+    const ingestText = ref('')
+    const queryText = ref('')
+    const out = ref('Ready.')
+
+    async function refresh() {
+      try {
+        const h = await fetch('/api/health').then(r => r.json())
+        health.value = h.data?.status || 'ok'
+        healthOk.value = true
+        embed.value = h.data?.embed || '—'
+        dim.value = h.data?.dim ?? '—'
+      } catch { health.value = 'down'; healthOk.value = false }
+      try {
+        const s = await fetch('/api/status').then(r => r.json())
+        qdrant.value = s.data?.qdrant || 'down'
+      } catch { qdrant.value = 'down' }
+    }
+
+    async function doIngest() {
+      const r = await fetch('/api/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collection: collection.value, text: ingestText.value })
+      }).then(r => r.json())
+      out.value = JSON.stringify(r, null, 2)
+      refresh()
+    }
+
+    async function doQuery() {
+      const r = await fetch('/api/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collection: collection.value, q: queryText.value, top_k: 5 })
+      }).then(r => r.json())
+      out.value = JSON.stringify(r, null, 2)
+    }
+
+    onMounted(() => { refresh(); setInterval(refresh, 4000) })
+    return { health, healthOk, qdrant, embed, dim, collection, ingestText, queryText, out, doIngest, doQuery }
+  }
+}).mount('#app')
+</script>
+</body>
+</html>

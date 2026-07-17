@@ -1,0 +1,133 @@
+// qdrant.src — thin HTTP client for a local Qdrant (REST).
+// Default: http://127.0.0.1:6333  (override with $QDRANT_URL).
+
+func qdrant_url() (u) {
+    u = env("QDRANT_URL")
+    if u == "" { u = "http://127.0.0.1:6333" }
+}
+
+func qdrant_headers() (h) {
+    h = []string{"Content-Type: application/json"}
+}
+
+func q_req(method, path, body) (status, resp, err) {
+    status, resp, err = http_request(method, qdrant_url() + path, qdrant_headers(), body)
+}
+
+func q_get(path) (status, resp, err) {
+    status, resp, err = q_req("GET", path, "")
+}
+
+func q_put(path, body) (status, resp, err) {
+    status, resp, err = q_req("PUT", path, body)
+}
+
+func q_post(path, body) (status, resp, err) {
+    status, resp, err = q_req("POST", path, body)
+}
+
+func q_delete(path) (status, resp, err) {
+    status, resp, err = q_req("DELETE", path, "")
+}
+
+func qdrant_ready() (ok, detail) {
+    st, body, err := q_get("/")
+    ok = 0
+    detail = err
+    if err == "" {
+        if st >= 200 {
+            if st < 300 {
+                ok = 1
+                detail = body
+            }
+        }
+    }
+}
+
+func jesc(s) (r) {
+    r = replace(s, "\\", "\\\\")
+    r = replace(r, "\"", "\\\"")
+    r = replace(r, "\n", "\\n")
+    r = replace(r, "\r", "")
+    r = replace(r, "\t", " ")
+}
+
+func ensure_collection(name) (ok, detail) {
+    body := "{\"vectors\":{\"size\":" + str(embed_dim()) + ",\"distance\":\"Cosine\"}}"
+    st, resp, err := q_put("/collections/" + name, body)
+    ok = 0
+    detail = err
+    if err != "" { return }
+    // 200 created, or 409 already exists — both fine
+    if st == 200 || st == 201 || st == 409 {
+        ok = 1
+        detail = resp
+        return
+    }
+    // some qdrant versions return 200 with result status for exists
+    if st >= 200 {
+        if st < 300 {
+            ok = 1
+            detail = resp
+            return
+        }
+    }
+    detail = "status=" + str(st) + " body=" + resp
+}
+
+func list_collections() (ok, detail) {
+    st, resp, err := q_get("/collections")
+    ok = 0
+    detail = err
+    if err != "" { return }
+    if st >= 200 {
+        if st < 300 {
+            ok = 1
+            detail = resp
+            return
+        }
+    }
+    detail = "status=" + str(st) + " body=" + resp
+}
+
+func upsert_point(coll, text) (ok, detail) {
+    eok, edet := ensure_collection(coll)
+    if eok == 0 {
+        ok = 0
+        detail = "ensure_collection: " + edet
+        return
+    }
+    vec := embed_json(text)
+    id := point_id(text)
+    payload := "{\"points\":[{\"id\":" + str(id) + ",\"vector\":" + vec + ",\"payload\":{\"text\":\"" + jesc(text) + "\"}}]}"
+    st, resp, err := q_put("/collections/" + coll + "/points?wait=true", payload)
+    ok = 0
+    detail = err
+    if err != "" { return }
+    if st >= 200 {
+        if st < 300 {
+            ok = 1
+            detail = "{\"id\":" + str(id) + ",\"qdrant\":" + resp + "}"
+            return
+        }
+    }
+    detail = "status=" + str(st) + " body=" + resp
+}
+
+func search_points(coll, q, top_k) (ok, detail) {
+    if top_k <= 0 { top_k = 5 }
+    vec := embed_json(q)
+    body := "{\"vector\":" + vec + ",\"limit\":" + str(top_k) + ",\"with_payload\":true}"
+    st, resp, err := q_post("/collections/" + coll + "/points/search", body)
+    ok = 0
+    detail = err
+    if err != "" { return }
+    if st >= 200 {
+        if st < 300 {
+            ok = 1
+            detail = resp
+            return
+        }
+    }
+    detail = "status=" + str(st) + " body=" + resp
+}

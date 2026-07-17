@@ -1,0 +1,141 @@
+// main.src — agent-first CLI + HTTP server for machin-rag.
+//
+// Commands (JSON on stdout unless serve):
+//   status | collections | ingest | query | serve | help | help-json | version
+
+func usage() {
+    println("machin-rag — agent-first local RAG (Qdrant + tiny hash embedder)")
+    println("")
+    println("usage: machin-rag <command> [flags]")
+    println("")
+    println("commands:")
+    println("  status                 qdrant reachability + embed info (JSON)")
+    println("  collections            list qdrant collections (JSON)")
+    println("  ingest -c NAME -t TXT  upsert one text chunk")
+    println("  ingest -c NAME -f PATH upsert file contents")
+    println("  query  -c NAME -q TXT [-k N]  similarity search")
+    println("  serve  [-port N]       HTTP API + Vue UI (default :7091)")
+    println("  version")
+    println("  help | help-json")
+    println("")
+    println("env: QDRANT_URL (default http://127.0.0.1:6333)  PORT")
+}
+
+func help_json() {
+    out_ok("{\"name\":\"machin-rag\",\"version\":\"" + app_version() + "\",\"commands\":[\"status\",\"collections\",\"ingest\",\"query\",\"serve\",\"version\",\"help\",\"help-json\"],\"flags\":{\"-c\":\"collection\",\"-t\":\"text\",\"-f\":\"file\",\"-q\":\"query\",\"-k\":\"top_k\",\"-port\":\"serve port\"},\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + ",\"qdrant_url\":\"" + jesc(qdrant_url()) + "\"}")
+}
+
+func cmd_status() {
+    ok, detail := qdrant_ready()
+    q := "down"
+    if ok == 1 { q = "up" }
+    out_ok("{\"qdrant\":\"" + q + "\",\"qdrant_url\":\"" + jesc(qdrant_url()) + "\",\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + "\"}")
+}
+
+func cmd_collections() {
+    ok, detail := list_collections()
+    if ok == 0 { out_err(106, "qdrant", detail) }
+    out_ok(detail)
+}
+
+func cmd_ingest(fs) {
+    coll := flag_get(fs, "c")
+    text := flag_get(fs, "t")
+    file := flag_get(fs, "f")
+    if coll == "" { out_err(82, "validation", "need -c collection") }
+    if file != "" {
+        text = read_file(file)
+        if text == "" { out_err(82, "validation", "empty or missing file") }
+    }
+    if text == "" { out_err(82, "validation", "need -t text or -f file") }
+    ok, detail := upsert_point(coll, text)
+    if ok == 0 { out_err(106, "qdrant", detail) }
+    out_ok(detail)
+}
+
+func cmd_query(fs) {
+    coll := flag_get(fs, "c")
+    q := flag_get(fs, "q")
+    k := flag_int_val(fs, "k")
+    if coll == "" { out_err(82, "validation", "need -c collection") }
+    if q == "" { out_err(82, "validation", "need -q query") }
+    if k <= 0 { k = 5 }
+    ok, detail := search_points(coll, q, k)
+    if ok == 0 { out_err(106, "qdrant", detail) }
+    out_ok(detail)
+}
+
+func path_only(p) (out) {
+    out = p
+    qi := index(p, "?")
+    if qi >= 0 { out = substr(p, 0, qi) }
+}
+
+func make_router() (r) {
+    r = new_router()
+    route(r, "GET", "/api/health", func(req) { return handle_health(req) })
+    route(r, "GET", "/api/status", func(req) { return handle_status(req) })
+    route(r, "GET", "/api/collections", func(req) { return handle_collections(req) })
+    route(r, "POST", "/api/ingest", func(req) { return handle_ingest(req) })
+    route(r, "POST", "/api/query", func(req) { return handle_query(req) })
+    route(r, "GET", "/", func(req) { return handle_ui(req) })
+}
+
+func dispatch_rag(router, req) (res) {
+    key := req.method + " " + path_only(req.path)
+    if has(router, key) {
+        h := router[key]
+        res = h(req)
+    } else {
+        res = not_found()
+    }
+}
+
+func cmd_serve(fs) {
+    port := flag_int_val(fs, "port")
+    if port <= 0 {
+        pe := env("PORT")
+        if pe != "" { port = parse_int(pe) }
+    }
+    if port <= 0 { port = 7091 }
+    r := make_router()
+    println("machin-rag serving on http://localhost:" + str(port))
+    println("  UI:  http://localhost:" + str(port) + "/")
+    println("  API: /api/health /api/status /api/collections /api/ingest /api/query")
+    println("  Qdrant: " + qdrant_url() + "  embed: " + embed_provider())
+    serve(port, func(req) { return dispatch_rag(r, req) })
+}
+
+func main() {
+    fs := new_flags("machin-rag")
+    fs = flag_str(fs, "c", "c", "", "collection name")
+    fs = flag_str(fs, "t", "t", "", "text to ingest")
+    fs = flag_str(fs, "f", "f", "", "file path to ingest")
+    fs = flag_str(fs, "q", "q", "", "query text")
+    fs = flag_int(fs, "k", "k", "5", "top_k")
+    fs = flag_int(fs, "port", "p", "0", "serve port")
+    fs = parse_flags(fs, args())
+
+    if flag_on(fs, "help") {
+        usage()
+        exit(0)
+    }
+
+    pos := flag_args(fs)
+    cmd := "help"
+    if len(pos) > 0 { cmd = pos[0] }
+
+    if cmd == "status" { cmd_status() }
+    if cmd == "collections" { cmd_collections() }
+    if cmd == "ingest" { cmd_ingest(fs) }
+    if cmd == "query" { cmd_query(fs) }
+    if cmd == "serve" { cmd_serve(fs) }
+    if cmd == "version" { out_ok("\"" + app_version() + "\"") }
+    if cmd == "help-json" { help_json() }
+    if cmd == "help" {
+        usage()
+        exit(0)
+    }
+    usage()
+    out_err(85, "invalid_arg", "unknown command: " + cmd)
+}

@@ -1,0 +1,7 @@
+app.mfl
+machin-rag
+src/ui_gen.src
+*.o
+data/
+.venv/
+__pycache__/

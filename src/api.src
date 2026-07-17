@@ -1,0 +1,77 @@
+// api.src — HTTP handlers + agent-first JSON envelope helpers.
+
+func app_version() (v) { v = "0.1.0" }
+
+func eprint(s) { n := write(2, s + "\n") }
+
+func out_ok(dataJson) {
+    println("{\"ok\":true,\"version\":\"" + app_version() + "\",\"data\":" + dataJson + "}")
+    exit(0)
+}
+
+func out_err(code, typ, msg) {
+    eprint("{\"ok\":false,\"error\":{\"code\":" + str(code) + ",\"type\":\"" + typ + "\",\"message\":\"" + jesc(msg) + "\"}}")
+    exit(code)
+}
+
+func api_ok(dataJson) (r) {
+    r = ok_json("{\"ok\":true,\"version\":\"" + app_version() + "\",\"data\":" + dataJson + "}")
+}
+
+func api_err(code, msg) (r) {
+    st := "400 Bad Request"
+    if code == 502 { st = "502 Bad Gateway" }
+    if code == 500 { st = "500 Internal Server Error" }
+    r = response(st, "application/json", "{\"ok\":false,\"error\":\"" + jesc(msg) + "\"}")
+}
+
+type IngestReq struct { collection string  text string  file string }
+type QueryReq struct { collection string  q string  top_k int }
+
+func handle_health(req) (res) {
+    res = api_ok("{\"status\":\"healthy\",\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + "}")
+}
+
+func handle_status(req) (res) {
+    ok, detail := qdrant_ready()
+    q := "down"
+    if ok == 1 { q = "up" }
+    res = api_ok("{\"status\":\"running\",\"qdrant\":\"" + q + "\",\"qdrant_url\":\"" + jesc(qdrant_url()) + "\",\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + "\",\"version\":\"" + app_version() + "\"}")
+}
+
+func handle_collections(req) (res) {
+    ok, detail := list_collections()
+    if ok == 0 { return api_err(502, detail) }
+    res = api_ok(detail)
+}
+
+func handle_ingest(req) (res) {
+    if req.body == "" { return api_err(400, "body required") }
+    r := parse(req.body, IngestReq{})
+    if r.collection == "" { return api_err(400, "collection required") }
+    text := r.text
+    if r.file != "" {
+        text = read_file(r.file)
+        if text == "" { return api_err(400, "empty or missing file") }
+    }
+    if text == "" { return api_err(400, "text or file required") }
+    ok, detail := upsert_point(r.collection, text)
+    if ok == 0 { return api_err(502, detail) }
+    res = api_ok(detail)
+}
+
+func handle_query(req) (res) {
+    if req.body == "" { return api_err(400, "body required") }
+    r := parse(req.body, QueryReq{})
+    if r.collection == "" { return api_err(400, "collection required") }
+    if r.q == "" { return api_err(400, "q required") }
+    top := r.top_k
+    if top <= 0 { top = 5 }
+    ok, detail := search_points(r.collection, r.q, top)
+    if ok == 0 { return api_err(502, detail) }
+    res = api_ok(detail)
+}
+
+func handle_ui(req) (res) {
+    res = ok_html(index_html())
+}

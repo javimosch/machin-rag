@@ -1,0 +1,7 @@
+{
+  "name": "machin-rag",
+  "version": "0.1.0",
+  "description": "Agent-first local RAG — Qdrant + tiny hash embedder, one machin binary, no BYOK",
+  "private": true,
+  "license": "MIT"
+}
