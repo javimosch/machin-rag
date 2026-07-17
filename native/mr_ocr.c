@@ -65,17 +65,30 @@ int64_t mr_ocr_available(void) {
     return load_tess() ? 1 : 0;
 }
 
+/* Return datapath for TessBaseAPIInit3: directory that CONTAINS tessdata/.
+ * If TESSDATA_PREFIX already points at …/tessdata, return its parent.
+ * NULL means “let Tesseract read TESSDATA_PREFIX itself”. */
 static const char *tessdata_path(void) {
     const char *env = getenv("TESSDATA_PREFIX");
-    if (env && env[0]) return env;
-    /* common Ubuntu paths (parent of tessdata/) */
+    if (env && env[0]) {
+        /* …/tessdata/eng.traineddata */
+        char probe[1024];
+        snprintf(probe, sizeof(probe), "%s/eng.traineddata", env);
+        if (access(probe, R_OK) == 0) {
+            /* env is the tessdata dir — Init3 wants parent, or NULL+env */
+            return NULL;
+        }
+        snprintf(probe, sizeof(probe), "%s/tessdata/eng.traineddata", env);
+        if (access(probe, R_OK) == 0) return env;
+        return NULL; /* still let tesseract honor the env var */
+    }
     if (access("/usr/share/tesseract-ocr/5/tessdata/eng.traineddata", R_OK) == 0)
         return "/usr/share/tesseract-ocr/5/";
     if (access("/usr/share/tesseract-ocr/4.00/tessdata/eng.traineddata", R_OK) == 0)
         return "/usr/share/tesseract-ocr/4.00/";
     if (access("/usr/share/tessdata/eng.traineddata", R_OK) == 0)
         return "/usr/share/";
-    return "/usr/share/tesseract-ocr/4.00/";
+    return NULL;
 }
 
 /* OCR an image file (png/jpg/tif…). Returns length, or -1. */
@@ -86,6 +99,7 @@ int64_t mr_ocr_file(const char *image_path, const char *lang, char *out, int64_t
     const char *lg = (lang && lang[0]) ? lang : "eng";
     TessBaseAPI *api = g_create();
     if (!api) return -1;
+    /* datapath NULL → Tesseract uses TESSDATA_PREFIX / compiled defaults */
     if (g_init3(api, tessdata_path(), lg) != 0) {
         g_delete(api);
         return -1;

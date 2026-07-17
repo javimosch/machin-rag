@@ -41,7 +41,8 @@ jobs:
       - name: Smoke
         run: chmod +x scripts/smoke.sh && ./scripts/smoke.sh
 
-      - name: Eval hash (report; non-blocking quality bar)
+      - name: Eval hash + synonyms (report; non-blocking)
         run: |
-          chmod +x scripts/eval_hash.py
+          chmod +x scripts/eval_hash.py scripts/eval_synonyms.py
           python3 scripts/eval_hash.py || true
+          python3 scripts/eval_synonyms.py || true

@@ -1,6 +1,6 @@
 // api.src — HTTP handlers + agent-first JSON envelope helpers.
 
-func app_version() (v) { v = "0.6.0" }
+func app_version() (v) { v = "0.6.1" }
 
 func eprint(s) { n := write(2, s + "\n") }
 

@@ -75,13 +75,15 @@ func text_chars_no_stubs(body) (n) {
     }
 }
 
-func should_ocr_image(alt) (yes) {
+// mode: text-only|mixed|images-only — images-only always OCRs media when enabled.
+func should_ocr_image(alt, mode) (yes) {
     yes = 0
     if cfg_ocr_enabled() == 0 { return }
     m := cfg_ocr_images_mode()
     if m == "never" { return }
+    if mode == "images-only" { yes = 1; return }
     if m == "always" { yes = 1; return }
-    // when_empty_alt
+    // when_empty_alt (mixed)
     if trim(alt) == "" { yes = 1 }
 }
 

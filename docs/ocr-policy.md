@@ -6,7 +6,7 @@ machin-rag must ingest DOCX/PDF in three shapes. Decision for **v0.6**:
 |------|----------------|------------------|---------------------|
 | **text-only** | Enough text (`>= ocr.min_text_chars`), no/empty media | Text layer only | Never runs |
 | **mixed** | Enough text **and** images/empty pages | Text primary; image stubs (alt/sha256) | OCR images when `ocr.images=when_empty_alt` (alt empty) or `always` |
-| **images-only** | Little/no text + images (or PDF pages with no text layer) | **Refuse** with clear error unless OCR on | Required; fails if Tesseract missing |
+| **images-only** | Little/no text + images (or PDF pages with no text layer) | **Refuse** unless OCR on | Required — OCR **all** images/empty pages (ignores alt); fails if Tesseract missing |
 
 ## Why OCR is opt-in (not always-on)
 
@@ -26,7 +26,8 @@ machin-rag must ingest DOCX/PDF in three shapes. Decision for **v0.6**:
 ```
 
 - `images`: `when_empty_alt` | `always` | `never`
-- Env: `TESSDATA_PREFIX` if tessdata is non-standard
+- Env: `TESSDATA_PREFIX` — prefer the `tessdata` directory itself  
+  (e.g. `/usr/share/tesseract-ocr/4.00/tessdata`), or its parent.
 
 ## Runtime packages (Ubuntu)
 
