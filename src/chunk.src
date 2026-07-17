@@ -96,12 +96,16 @@ func ingest_text(coll, text, source, fmt) (ok, detail) {
 }
 
 func ingest_file(coll, path, fmt_override) (ok, detail) {
+    fmt := detect_format(path, fmt_override)
+    if fmt == "docx" {
+        ok, detail = ingest_docx(coll, path)
+        return
+    }
     raw := read_file(path)
     if raw == "" {
         ok = 0
         detail = "empty or missing file: " + path
         return
     }
-    fmt := detect_format(path, fmt_override)
     ok, detail = ingest_text(coll, raw, path, fmt)
 }

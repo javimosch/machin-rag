@@ -47,3 +47,15 @@
             </div>
           </div>
         </div>
+
+        <div class="feature-card rounded-xl p-6">
+          <div class="flex items-start gap-4">
+            <div class="w-12 h-12 rounded-lg bg-rose-500/10 flex items-center justify-center flex-shrink-0">
+              <span class="text-2xl">📎</span>
+            </div>
+            <div>
+              <h3 class="text-xl font-semibold text-white mb-2">DOCX ingest (v0.3)</h3>
+              <p class="text-white/40 leading-relaxed">Native OOXML path: ZIP+deflate via zlib, text from <code>word/document.xml</code>, and searchable <code>[image: …]</code> stubs for <code>word/media/*</code> (OCR later).</p>
+            </div>
+          </div>
+        </div>

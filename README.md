@@ -27,7 +27,7 @@ mkdir -p ~/.machin-rag && cp config.example.json ~/.machin-rag/config.json   # o
 
 Config: `~/.machin-rag/config.json` → env → CLI. Env: `QDRANT_URL` (default `http://127.0.0.1:6333`), `PORT` (serve, default `7091`).
 
-## Formats (v0.2)
+## Formats (v0.3)
 
 | Format | Detection | Chunking |
 |--------|-----------|----------|
@@ -36,8 +36,9 @@ Config: `~/.machin-rag/config.json` → env → CLI. Env: `QDRANT_URL` (default 
 | `csv` | `.csv` | one chunk per row (header → fields) |
 | `json` | `.json` | array of objects or single object |
 | `ndjson` | `.ndjson` / `.jsonl` | one object per line |
+| `docx` | `.docx` | OOXML text (`<w:t>`) + `word/media/*` stubs |
 
-Force with `-F` / `--format` or API `"format"`. PDF/DOCX not yet.
+Force with `-F` / `--format` or API `"format"`. PDF not yet. Build needs **zlib** (`libz`).
 
 ## Agent contract
 
@@ -69,7 +70,8 @@ MVP uses **feature hashing** over `sha256` tokens → 64-d cosine vectors (`hash
 
 ```
 machin-rag/
-├── src/                 # MFL: config, parsers, chunk, embed, qdrant, api, main
+├── src/                 # MFL: config, parsers, docx, chunk, embed, qdrant, api, main
+├── native/mr_zip.c      # ZIP extract for DOCX (zlib)
 ├── ui/index.html        # Vue 3 CDN (embedded at build)
 ├── config.example.json  # → ~/.machin-rag/config.json
 ├── compose.yml          # Qdrant only
