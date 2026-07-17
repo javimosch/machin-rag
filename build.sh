@@ -16,7 +16,7 @@ PY
 # 2. Compose sources (order does not matter for encode) then 3. compile.
 "$MACHIN" encode \
   src/machweb.src src/flags.src src/embed.src src/config.src \
-  src/parsers.src src/chunk.src src/docx.src src/qdrant.src src/api.src src/main.src src/ui_gen.src \
+  src/parsers.src src/chunk.src src/docx_io.src src/docx.src src/qdrant.src src/api.src src/main.src src/ui_gen.src \
   > app.mfl
 "$MACHIN" build app.mfl -o machin-rag
 

@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <zlib.h>
+#include <openssl/sha.h>
 
 static uint16_t rd16(const uint8_t *p) {
     return (uint16_t)(p[0] | (p[1] << 8));
@@ -174,6 +175,46 @@ int64_t mr_zip_entry_size(const char *zip_path, const char *entry_name) {
         size_t next = off + 46 + e.name_len + e.extra_len + e.comment_len;
         if (e.name_len == want && memcmp(e.name, entry_name, want) == 0) {
             result = (int64_t)e.uncomp_size;
+            break;
+        }
+        off = next;
+    }
+    free(data);
+    return result;
+}
+
+/* SHA-256 hex (64 chars + NUL) of an entry's uncompressed bytes. Returns 64, or -1. */
+int64_t mr_zip_sha256_hex(const char *zip_path, const char *entry_name, char *out, int64_t out_cap) {
+    if (!zip_path || !entry_name || !out || out_cap < 65) return -1;
+    size_t zlen = 0;
+    uint8_t *data = slurp(zip_path, &zlen);
+    if (!data) return -1;
+    const uint8_t *eocd = find_eocd(data, zlen);
+    if (!eocd) { free(data); return -1; }
+    uint16_t nent = rd16(eocd + 10);
+    uint32_t cd_off = rd32(eocd + 16);
+    size_t want = strlen(entry_name);
+    size_t off = cd_off;
+    int64_t result = -1;
+    for (uint16_t i = 0; i < nent; i++) {
+        ZipEntry e;
+        if (cd_entry_at(data, zlen, off, &e) != 0) break;
+        size_t next = off + 46 + e.name_len + e.extra_len + e.comment_len;
+        if (e.name_len == want && memcmp(e.name, entry_name, want) == 0) {
+            uint8_t *raw = NULL;
+            size_t raw_len = 0;
+            if (extract_entry(data, zlen, &e, &raw, &raw_len) == 0) {
+                unsigned char dig[SHA256_DIGEST_LENGTH];
+                SHA256(raw, raw_len, dig);
+                free(raw);
+                static const char *hexd = "0123456789abcdef";
+                for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+                    out[i * 2] = hexd[(dig[i] >> 4) & 0xf];
+                    out[i * 2 + 1] = hexd[dig[i] & 0xf];
+                }
+                out[64] = '\0';
+                result = 64;
+            }
             break;
         }
         off = next;

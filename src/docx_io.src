@@ -1,0 +1,264 @@
+// docx_io.src — ZIP FFI + XML/OOXML helpers for DOCX ingest.
+
+extern "mrzip" {
+    cflags "native/mr_zip.c"
+    link "z"
+    link "crypto"
+    fn mr_zip_read(string, string, ptr, int) int
+    fn mr_zip_entry_size(string, string) int
+    fn mr_zip_list(string, string, ptr, int) int
+    fn mr_zip_sha256_hex(string, string, ptr, int) int
+}
+
+func xml_decode_entities(s) (out) {
+    out = s
+    out = replace(out, "&amp;", "&")
+    out = replace(out, "&lt;", "<")
+    out = replace(out, "&gt;", ">")
+    out = replace(out, "&quot;", "\"")
+    out = replace(out, "&apos;", "'")
+}
+
+func index_from(s, needle, from) (pos) {
+    pos = -1
+    if from < 0 { from = 0 }
+    if from >= len(s) { return }
+    rest := substr(s, from, len(s))
+    rel := index(rest, needle)
+    if rel < 0 { return }
+    pos = from + rel
+}
+
+func xml_attr(region, key) (val) {
+    val = ""
+    needle := key + "=\""
+    p := index(region, needle)
+    if p < 0 { return }
+    start := p + len(needle)
+    end := index_from(region, "\"", start)
+    if end < 0 { return }
+    val = xml_decode_entities(substr(region, start, end))
+}
+
+func path_basename(path) (base) {
+    base = path
+    slash := -1
+    i := 0
+    while i < len(path) {
+        if substr(path, i, i + 1) == "/" { slash = i }
+        i = i + 1
+    }
+    if slash >= 0 { base = substr(path, slash + 1, len(path)) }
+}
+
+func media_content_type(path) (ct) {
+    ct = "application/octet-stream"
+    e := to_lower(path)
+    if has_suffix(e, ".png") { ct = "image/png"; return }
+    if has_suffix(e, ".jpg") || has_suffix(e, ".jpeg") { ct = "image/jpeg"; return }
+    if has_suffix(e, ".gif") { ct = "image/gif"; return }
+    if has_suffix(e, ".webp") { ct = "image/webp"; return }
+    if has_suffix(e, ".svg") { ct = "image/svg+xml"; return }
+    if has_suffix(e, ".bmp") { ct = "image/bmp"; return }
+    if has_suffix(e, ".emf") { ct = "image/emf"; return }
+    if has_suffix(e, ".wmf") { ct = "image/wmf"; return }
+}
+
+func zip_read_string(path, entry) (ok, body) {
+    ok = 0
+    body = ""
+    sz := mr_zip_entry_size(path, entry)
+    if sz < 0 { return }
+    cap := sz + 1
+    if cap < 64 { cap = 64 }
+    if cap > 33554432 { return }
+    buf := alloc(cap)
+    if buf == 0 { return }
+    n := mr_zip_read(path, entry, buf, cap)
+    if n < 0 { free(buf); return }
+    body = ptr_str(buf)
+    free(buf)
+    ok = 1
+}
+
+func zip_sha256_hex(path, entry) (hex) {
+    hex = ""
+    buf := alloc(65)
+    if buf == 0 { return }
+    n := mr_zip_sha256_hex(path, entry, buf, 65)
+    if n == 64 { hex = ptr_str(buf) }
+    free(buf)
+}
+
+func zip_list_prefix(path, prefix) (ok, names) {
+    ok = 0
+    names = []string{}
+    cap := 262144
+    buf := alloc(cap)
+    if buf == 0 { return }
+    n := mr_zip_list(path, prefix, buf, cap)
+    if n < 0 { free(buf); return }
+    raw := ptr_str(buf)
+    free(buf)
+    lines := split(raw, "\n")
+    for _, line := range lines {
+        line = trim(line)
+        if line != "" { names = append(names, line) }
+    }
+    ok = 1
+}
+
+// Relationship Id → word/-relative zip path (JSON object string).
+func parse_docx_rels(rels_xml) (js) {
+    js = "{"
+    first := 1
+    i := 0
+    n := len(rels_xml)
+    while i < n {
+        p := index_from(rels_xml, "<Relationship", i)
+        if p < 0 { break }
+        end := index_from(rels_xml, "/>", p)
+        if end < 0 { end = index_from(rels_xml, ">", p) }
+        if end < 0 { break }
+        tag := substr(rels_xml, p, end)
+        id := xml_attr(tag, "Id")
+        target := xml_attr(tag, "Target")
+        typ := xml_attr(tag, "Type")
+        i = end + 1
+        if id == "" || target == "" { continue }
+        // only image relationships (and any Target under media/)
+        use := 0
+        if index(typ, "/image") >= 0 { use = 1 }
+        if index(to_lower(target), "media/") >= 0 { use = 1 }
+        if use == 0 { continue }
+        // Target is relative to word/
+        path := target
+        if has_prefix(path, "/") { path = substr(path, 1, len(path)) }
+        if has_prefix(path, "word/") == false {
+            if has_prefix(path, "media/") { path = "word/" + path }
+        }
+        if first == 0 { js = js + "," }
+        js = js + "\"" + jesc(id) + "\":\"" + jesc(path) + "\""
+        first = 0
+    }
+    js = js + "}"
+}
+
+func docx_core_props(path) (title, creator) {
+    title = ""
+    creator = ""
+    ok, xml := zip_read_string(path, "docProps/core.xml")
+    if ok == 0 { return }
+    // <dc:title>...</dc:title> or self-closing empty
+    t0 := index(xml, "<dc:title")
+    if t0 >= 0 {
+        gt := index_from(xml, ">", t0)
+        if gt >= 0 {
+            if substr(xml, gt - 1, gt) != "/" {
+                t1 := index_from(xml, "</dc:title>", gt + 1)
+                if t1 >= 0 { title = xml_decode_entities(trim(substr(xml, gt + 1, t1))) }
+            }
+        }
+    }
+    c0 := index(xml, "<dc:creator")
+    if c0 >= 0 {
+        gt := index_from(xml, ">", c0)
+        if gt >= 0 {
+            if substr(xml, gt - 1, gt) != "/" {
+                c1 := index_from(xml, "</dc:creator>", gt + 1)
+                if c1 >= 0 { creator = xml_decode_entities(trim(substr(xml, gt + 1, c1))) }
+            }
+        }
+    }
+}
+
+// True if xml[i..] starts with <w:t> / <w:t …> (not <w:tc>, <w:tr>, …).
+func is_wt_open(xml, i) (ok) {
+    ok = 0
+    if i + 4 > len(xml) { return }
+    if substr(xml, i, i + 4) != "<w:t" { return }
+    if i + 4 == len(xml) { ok = 1; return }
+    ch := substr(xml, i + 4, i + 5)
+    if ch == ">" || ch == " " || ch == "/" || ch == "\n" || ch == "\r" || ch == "\t" { ok = 1 }
+}
+
+func extract_wt_text(region) (text) {
+    text = ""
+    i := 0
+    n := len(region)
+    while i < n {
+        if is_wt_open(region, i) == 1 {
+            j := i + 4
+            while j < n {
+                if substr(region, j, j + 1) == ">" { break }
+                j = j + 1
+            }
+            if j >= n { break }
+            if j > 0 {
+                if substr(region, j - 1, j) == "/" { i = j + 1; continue }
+            }
+            start := j + 1
+            end := index_from(region, "</w:t>", start)
+            if end < 0 { break }
+            text = text + xml_decode_entities(substr(region, start, end))
+            i = end + 6
+            continue
+        }
+        i = i + 1
+    }
+}
+
+func table_to_text(tbl) (text) {
+    text = ""
+    // rows
+    i := 0
+    n := len(tbl)
+    while i < n {
+        r0 := index_from(tbl, "<w:tr", i)
+        if r0 < 0 { break }
+        r1 := index_from(tbl, "</w:tr>", r0)
+        if r1 < 0 { break }
+        row := substr(tbl, r0, r1)
+        cells := ""
+        ci := 0
+        rn := len(row)
+        first := 1
+        while ci < rn {
+            c0 := index_from(row, "<w:tc", ci)
+            if c0 < 0 { break }
+            c1 := index_from(row, "</w:tc>", c0)
+            if c1 < 0 { break }
+            cell := trim(extract_wt_text(substr(row, c0, c1)))
+            if first == 0 { cells = cells + " | " }
+            cells = cells + cell
+            first = 0
+            ci = c1 + 6
+        }
+        if trim(cells) != "" {
+            if text != "" { text = text + "\n" }
+            text = text + cells
+        }
+        i = r1 + 6
+    }
+}
+
+func nearby_alt(xml, embed_pos) (alt) {
+    alt = ""
+    // search back up to 800 chars for wp:docPr / descr / name
+    start := embed_pos - 800
+    if start < 0 { start = 0 }
+    region := substr(xml, start, embed_pos + 80)
+    d := xml_attr(region, "descr")
+    if d != "" { alt = d; return }
+    nm := xml_attr(region, "name")
+    if nm != "" { alt = nm }
+}
+
+func image_stub_line(base, alt, sha, sz, ct) (line) {
+    line = "[image: " + base
+    if alt != "" { line = line + " | alt: " + alt }
+    if sha != "" { line = line + " | sha256: " + substr(sha, 0, 12) }
+    if sz > 0 { line = line + " | bytes: " + str(sz) }
+    if ct != "" { line = line + " | " + ct }
+    line = line + "]"
+}

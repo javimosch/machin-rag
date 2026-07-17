@@ -19,5 +19,8 @@
   "normalize": {
     "template": "",
     "drop_empty": true
+  },
+  "docx": {
+    "image_stubs": true
   }
 }

@@ -54,8 +54,8 @@
               <span class="text-2xl">📎</span>
             </div>
             <div>
-              <h3 class="text-xl font-semibold text-white mb-2">DOCX ingest (v0.3)</h3>
-              <p class="text-white/40 leading-relaxed">Native OOXML path: ZIP+deflate via zlib, text from <code>word/document.xml</code>, and searchable <code>[image: …]</code> stubs for <code>word/media/*</code> (OCR later).</p>
+              <h3 class="text-xl font-semibold text-white mb-2">DOCX ingest (v0.3→v0.4)</h3>
+              <p class="text-white/40 leading-relaxed">Native OOXML: ZIP+deflate, reading-order walk with headings/tables, image rels resolved to alt text + sha256/size/content-type in payload. OCR still later.</p>
             </div>
           </div>
         </div>

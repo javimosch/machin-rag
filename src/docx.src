@@ -1,134 +1,155 @@
-// docx.src — OOXML (.docx) ingest via native ZIP (zlib) + XML text scrape.
-// Phase 1: word/document.xml → text chunks; word/media/* listed as image stubs.
+// docx.src — OOXML parse/ingest (phase 2 walk + chunking).
+// Low-level ZIP/XML helpers live in docx_io.src.
 
-extern "mrzip" {
-    cflags "native/mr_zip.c"
-    link "z"
-    fn mr_zip_read(string, string, ptr, int) int
-    fn mr_zip_entry_size(string, string) int
-    fn mr_zip_list(string, string, ptr, int) int
-}
-
-func xml_decode_entities(s) (out) {
-    out = s
-    out = replace(out, "&amp;", "&")
-    out = replace(out, "&lt;", "<")
-    out = replace(out, "&gt;", ">")
-    out = replace(out, "&quot;", "\"")
-    out = replace(out, "&apos;", "'")
-}
-
-// Pull visible text from word/document.xml: <w:t>…</w:t>, break on </w:p>.
-func docx_xml_to_text(xml) (text) {
-    text = ""
+// Walk document.xml in order → body text + JSON array of image objects.
+func docx_walk(path, xml, rels_js) (body, images_js) {
+    body = ""
+    images_js = "["
+    img_first := 1
     i := 0
     n := len(xml)
+    heading := ""
     while i < n {
-        // paragraph end → newline
-        if i + 5 <= n {
-            if substr(xml, i, i + 5) == "</w:p" {
-                if text != "" {
-                    if has_suffix(text, "\n") == false { text = text + "\n" }
+        // table block
+        if i + 6 <= n {
+            if substr(xml, i, i + 6) == "<w:tbl" {
+                end := index_from(xml, "</w:tbl>", i)
+                if end < 0 { break }
+                tbl := substr(xml, i, end + 8)
+                ttxt := table_to_text(tbl)
+                if trim(ttxt) != "" {
+                    if body != "" { body = body + "\n" }
+                    body = body + ttxt + "\n"
                 }
-                // skip to >
-                while i < n {
-                    if substr(xml, i, i + 1) == ">" { i = i + 1; break }
-                    i = i + 1
-                }
+                i = end + 8
                 continue
             }
         }
-        // <w:t ...> or <w:t>
+        // paragraph
         if i + 4 <= n {
-            if substr(xml, i, i + 4) == "<w:t" {
-                // find end of open tag
-                j := i + 4
-                while j < n {
-                    if substr(xml, j, j + 1) == ">" { break }
-                    j = j + 1
+            if substr(xml, i, i + 4) == "<w:p" {
+                // ensure <w:p or <w:p>
+                okp := 0
+                if i + 4 == n { okp = 1 }
+                if i + 4 < n {
+                    ch := substr(xml, i + 4, i + 5)
+                    if ch == " " || ch == ">" || ch == "/" || ch == "\n" || ch == "\r" || ch == "\t" { okp = 1 }
                 }
-                if j >= n { break }
-                // self-closing?
-                if j > 0 {
-                    if substr(xml, j - 1, j) == "/" {
-                        i = j + 1
-                        continue
+                if okp == 1 {
+                    end := index_from(xml, "</w:p>", i)
+                    if end < 0 { break }
+                    para := substr(xml, i, end + 6)
+                    // heading style?
+                    heading = ""
+                    ps := index(para, "<w:pStyle")
+                    if ps >= 0 {
+                        tag_end := index_from(para, "/>", ps)
+                        if tag_end < 0 { tag_end = index_from(para, ">", ps) }
+                        if tag_end >= 0 {
+                            val := xml_attr(substr(para, ps, tag_end), "w:val")
+                            if val == "" { val = xml_attr(substr(para, ps, tag_end), "val") }
+                            vl := to_lower(val)
+                            if has_prefix(vl, "heading") || has_prefix(vl, "titre") {
+                                heading = val
+                            }
+                        }
                     }
+                    // inline images in this paragraph (reading order vs text: scan linearly)
+                    // Collect text runs and embeds in order within para
+                    pi := 0
+                    pn := len(para)
+                    line := ""
+                    while pi < pn {
+                        // image embed
+                        emb := index_from(para, "r:embed=\"", pi)
+                        wt := index_from(para, "<w:t", pi)
+                        use_emb := 0
+                        if emb >= 0 {
+                            if wt < 0 { use_emb = 1 }
+                            if wt >= 0 {
+                                if emb < wt { use_emb = 1 }
+                            }
+                        }
+                        if use_emb == 1 {
+                            a0 := emb + 9
+                            a1 := index_from(para, "\"", a0)
+                            if a1 < 0 { break }
+                            rid := substr(para, a0, a1)
+                            target, err := json_get(rels_js, "." + rid)
+                            media := ""
+                            if err == "" { media = cfg_unquote(target) }
+                            alt := nearby_alt(xml, i + emb)
+                            base := path_basename(media)
+                            if base == "" { base = rid }
+                            sha := ""
+                            sz := 0
+                            ct := ""
+                            if media != "" {
+                                sz_i := mr_zip_entry_size(path, media)
+                                if sz_i > 0 { sz = sz_i }
+                                sha = zip_sha256_hex(path, media)
+                                ct = media_content_type(media)
+                            }
+                            stub := image_stub_line(base, alt, sha, sz, ct)
+                            if line != "" { line = line + " " }
+                            line = line + stub
+                            // record image object
+                            if img_first == 0 { images_js = images_js + "," }
+                            images_js = images_js + "{\"rid\":\"" + jesc(rid) + "\",\"path\":\"" + jesc(media) + "\",\"name\":\"" + jesc(base) + "\",\"alt\":\"" + jesc(alt) + "\",\"sha256\":\"" + jesc(sha) + "\",\"bytes\":" + str(sz) + ",\"content_type\":\"" + jesc(ct) + "\"}"
+                            img_first = 0
+                            pi = a1 + 1
+                            continue
+                        }
+                        if wt >= 0 {
+                            if is_wt_open(para, wt) == 0 {
+                                pi = wt + 4
+                                continue
+                            }
+                            j := wt + 4
+                            while j < pn {
+                                if substr(para, j, j + 1) == ">" { break }
+                                j = j + 1
+                            }
+                            if j >= pn { break }
+                            if substr(para, j - 1, j) == "/" { pi = j + 1; continue }
+                            start := j + 1
+                            endt := index_from(para, "</w:t>", start)
+                            if endt < 0 { break }
+                            piece := xml_decode_entities(substr(para, start, endt))
+                            line = line + piece
+                            pi = endt + 6
+                            continue
+                        }
+                        break
+                    }
+                    line = trim(line)
+                    if line != "" {
+                        if heading != "" { line = "# " + line }
+                        if body != "" { body = body + "\n" }
+                        body = body + line
+                    }
+                    i = end + 6
+                    continue
                 }
-                start := j + 1
-                end := index_from(xml, "</w:t>", start)
-                if end < 0 { break }
-                piece := substr(xml, start, end)
-                piece = xml_decode_entities(piece)
-                text = text + piece
-                i = end + 6
-                continue
             }
         }
         i = i + 1
     }
-    text = trim(text)
+    images_js = images_js + "]"
+    body = trim(body)
 }
 
-func index_from(s, needle, from) (pos) {
-    pos = -1
-    if from < 0 { from = 0 }
-    if from >= len(s) { return }
-    rest := substr(s, from, len(s))
-    rel := index(rest, needle)
-    if rel < 0 { return }
-    pos = from + rel
-}
-
-func zip_read_string(path, entry) (ok, body) {
-    ok = 0
-    body = ""
-    sz := mr_zip_entry_size(path, entry)
-    if sz < 0 { return }
-    cap := sz + 1
-    if cap < 64 { cap = 64 }
-    // hard cap 32 MiB for a single OOXML part
-    if cap > 33554432 { return }
-    buf := alloc(cap)
-    if buf == 0 { return }
-    n := mr_zip_read(path, entry, buf, cap)
-    if n < 0 {
-        free(buf)
-        return
-    }
-    body = ptr_str(buf)
-    // ptr_str stops at NUL; we NUL-terminated in C when n < cap
-    free(buf)
-    ok = 1
-}
-
-func zip_list_prefix(path, prefix) (ok, names) {
-    ok = 0
-    names = []string{}
-    cap := 262144
-    buf := alloc(cap)
-    if buf == 0 { return }
-    n := mr_zip_list(path, prefix, buf, cap)
-    if n < 0 {
-        free(buf)
-        return
-    }
-    raw := ptr_str(buf)
-    free(buf)
-    lines := split(raw, "\n")
-    for _, line := range lines {
-        line = trim(line)
-        if line != "" { names = append(names, line) }
-    }
-    ok = 1
-}
-
-func images_json(names) (js) {
+func images_paths_json(images_js) (js) {
+    // extract .path fields for backward-compat "images":[...]
     js = "["
+    first := 1
     i := 0
-    for _, name := range names {
-        if i > 0 { js = js + "," }
-        js = js + "\"" + jesc(name) + "\""
+    while i < 256 {
+        raw, err := json_get(images_js, "[" + str(i) + "].path")
+        if err != "" { break }
+        if first == 0 { js = js + "," }
+        js = js + "\"" + jesc(cfg_unquote(raw)) + "\""
+        first = 0
         i = i + 1
     }
     js = js + "]"
@@ -137,24 +158,55 @@ func images_json(names) (js) {
 func parse_docx_file(path) (chunks) {
     chunks = []Chunk{}
     ok, xml := zip_read_string(path, "word/document.xml")
-    if ok == 0 {
-        // leave empty — caller reports error
-        return
-    }
-    text := docx_xml_to_text(xml)
-    img_ok, imgs := zip_list_prefix(path, "word/media/")
-    if img_ok == 0 { imgs = []string{} }
-    imgjs := images_json(imgs)
+    if ok == 0 { return }
+    rels_js := "{}"
+    rok, rels_xml := zip_read_string(path, "word/_rels/document.xml.rels")
+    if rok == 1 { rels_js = parse_docx_rels(rels_xml) }
+    title, creator := docx_core_props(path)
+    body, images_js := docx_walk(path, xml, rels_js)
+    img_paths := images_paths_json(images_js)
 
-    // size-split like md
+    // fallback: media not referenced via rels still listed
+    mok, media_all := zip_list_prefix(path, "word/media/")
+    if mok == 1 {
+        // append any media missing from images_js
+        for _, mpath := range media_all {
+            found := 0
+            ii := 0
+            while ii < 256 {
+                raw, err := json_get(images_js, "[" + str(ii) + "].path")
+                if err != "" { break }
+                if cfg_unquote(raw) == mpath { found = 1; break }
+                ii = ii + 1
+            }
+            if found == 0 {
+                base := path_basename(mpath)
+                sha := zip_sha256_hex(path, mpath)
+                sz := mr_zip_entry_size(path, mpath)
+                if sz < 0 { sz = 0 }
+                ct := media_content_type(mpath)
+                // extend images_js
+                if images_js == "[]" {
+                    images_js = "[{\"rid\":\"\",\"path\":\"" + jesc(mpath) + "\",\"name\":\"" + jesc(base) + "\",\"alt\":\"\",\"sha256\":\"" + jesc(sha) + "\",\"bytes\":" + str(sz) + ",\"content_type\":\"" + jesc(ct) + "\"}]"
+                } else {
+                    images_js = substr(images_js, 0, len(images_js) - 1) + ",{\"rid\":\"\",\"path\":\"" + jesc(mpath) + "\",\"name\":\"" + jesc(base) + "\",\"alt\":\"\",\"sha256\":\"" + jesc(sha) + "\",\"bytes\":" + str(sz) + ",\"content_type\":\"" + jesc(ct) + "\"}]"
+                }
+                if body != "" { body = body + "\n" }
+                body = body + image_stub_line(base, "", sha, sz, ct)
+            }
+        }
+        img_paths = images_paths_json(images_js)
+    }
+
     maxc := cfg_md_max()
     if maxc <= 0 { maxc = 2000 }
-    if text == "" {
-        meta := "{\"source\":\"" + jesc(path) + "\",\"format\":\"docx\",\"images\":" + imgjs + "}"
+    base_meta := "\"source\":\"" + jesc(path) + "\",\"format\":\"docx\",\"title\":\"" + jesc(title) + "\",\"creator\":\"" + jesc(creator) + "\",\"images\":" + img_paths
+
+    if body == "" {
+        meta := "{" + base_meta + "}"
         chunks = append(chunks, chunk_make("(empty docx)", meta))
     } else {
-        // split on blank lines first, then hard size
-        paras := split(text, "\n")
+        paras := split(body, "\n")
         buf := ""
         n := 0
         for _, p := range paras {
@@ -163,7 +215,7 @@ func parse_docx_file(path) (chunks) {
             if buf != "" { cand = buf + "\n" + line }
             if len(cand) > maxc {
                 if trim(buf) != "" {
-                    meta := "{\"source\":\"" + jesc(path) + "\",\"format\":\"docx\",\"i\":" + str(n) + ",\"images\":" + imgjs + "}"
+                    meta := "{" + base_meta + ",\"i\":" + str(n) + "}"
                     chunks = append(chunks, chunk_make(trim(buf), meta))
                     n = n + 1
                     buf = line
@@ -173,26 +225,42 @@ func parse_docx_file(path) (chunks) {
             buf = cand
         }
         if trim(buf) != "" {
-            meta := "{\"source\":\"" + jesc(path) + "\",\"format\":\"docx\",\"i\":" + str(n) + ",\"images\":" + imgjs + "}"
+            meta := "{" + base_meta + ",\"i\":" + str(n) + "}"
             chunks = append(chunks, chunk_make(trim(buf), meta))
         }
     }
-    // image stubs (searchable by filename; OCR later)
-    ii := 0
-    for _, name := range imgs {
-        base := name
-        // basename
-        slash := -1
-        bi := 0
-        while bi < len(name) {
-            if substr(name, bi, bi + 1) == "/" { slash = bi }
-            bi = bi + 1
+
+    if cfg_docx_image_stubs() == 1 {
+        ii := 0
+        while ii < 256 {
+            obj, err := json_get(images_js, "[" + str(ii) + "]")
+            if err != "" { break }
+            name, e1 := json_get(obj, ".name")
+            alt, e2 := json_get(obj, ".alt")
+            sha, e3 := json_get(obj, ".sha256")
+            path_i, e4 := json_get(obj, ".path")
+            ct, e5 := json_get(obj, ".content_type")
+            bytes_raw, e6 := json_get(obj, ".bytes")
+            rid, e7 := json_get(obj, ".rid")
+            if e1 != "" { name = "\"\"" }
+            if e2 != "" { alt = "\"\"" }
+            if e3 != "" { sha = "\"\"" }
+            if e4 != "" { path_i = "\"\"" }
+            if e5 != "" { ct = "\"\"" }
+            if e6 != "" { bytes_raw = "0" }
+            if e7 != "" { rid = "\"\"" }
+            nm := cfg_unquote(name)
+            al := cfg_unquote(alt)
+            sh := cfg_unquote(sha)
+            pt := cfg_unquote(path_i)
+            ctv := cfg_unquote(ct)
+            rd := cfg_unquote(rid)
+            bz := parse_int(cfg_unquote(bytes_raw))
+            stub := image_stub_line(nm, al, sh, bz, ctv)
+            meta := "{\"source\":\"" + jesc(path) + "\",\"format\":\"docx\",\"title\":\"" + jesc(title) + "\",\"creator\":\"" + jesc(creator) + "\",\"image\":\"" + jesc(pt) + "\",\"image_name\":\"" + jesc(nm) + "\",\"alt\":\"" + jesc(al) + "\",\"sha256\":\"" + jesc(sh) + "\",\"bytes\":" + str(bz) + ",\"content_type\":\"" + jesc(ctv) + "\",\"rid\":\"" + jesc(rd) + "\",\"i\":" + str(ii) + "}"
+            chunks = append(chunks, chunk_make(stub, meta))
+            ii = ii + 1
         }
-        if slash >= 0 { base = substr(name, slash + 1, len(name)) }
-        stub := "[image: " + base + "]"
-        meta := "{\"source\":\"" + jesc(path) + "\",\"format\":\"docx\",\"image\":\"" + jesc(name) + "\",\"i\":" + str(ii) + "}"
-        chunks = append(chunks, chunk_make(stub, meta))
-        ii = ii + 1
     }
 }
 

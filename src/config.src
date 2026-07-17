@@ -90,6 +90,7 @@ func cfg_csv_id_col() (c) { c = cfg_str(".csv.id_column", "") }
 func cfg_json_text_fields() (s) { s = cfg_str(".json.text_fields", "") }
 func cfg_normalize_template() (t) { t = cfg_str(".normalize.template", "") }
 func cfg_normalize_drop_empty() (b) { b = cfg_bool(".normalize.drop_empty", 1) }
+func cfg_docx_image_stubs() (b) { b = cfg_bool(".docx.image_stubs", 1) }
 
 func cfg_init() {
     cfg_load_file()
