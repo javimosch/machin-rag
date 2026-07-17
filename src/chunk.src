@@ -101,6 +101,10 @@ func ingest_file(coll, path, fmt_override) (ok, detail) {
         ok, detail = ingest_docx(coll, path)
         return
     }
+    if fmt == "pdf" {
+        ok, detail = ingest_pdf(coll, path)
+        return
+    }
     raw := read_file(path)
     if raw == "" {
         ok = 0

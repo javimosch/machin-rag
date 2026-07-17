@@ -8,7 +8,7 @@ func usage() {
     println("commands:")
     println("  status                 qdrant + config (JSON)")
     println("  collections            list qdrant collections (JSON)")
-    println("  ingest -c NAME -t TXT [-format md|csv|json|ndjson|txt|docx]")
+    println("  ingest -c NAME -t TXT [-format md|csv|json|ndjson|txt|docx|pdf]")
     println("  ingest -c NAME -f PATH [-format …]   parse by extension or -format")
     println("  query  -c NAME -q TXT [-k N]")
     println("  serve  [-port N]       HTTP API + Vue UI (default :7091)")
@@ -19,14 +19,14 @@ func usage() {
 }
 
 func help_json() {
-    out_ok("{\"name\":\"machin-rag\",\"version\":\"" + app_version() + "\",\"commands\":[\"status\",\"collections\",\"ingest\",\"query\",\"serve\",\"version\",\"help\",\"help-json\"],\"flags\":{\"-c\":\"collection\",\"-t\":\"text\",\"-f\":\"file\",\"-q\":\"query\",\"-k\":\"top_k\",\"-port\":\"serve port\",\"-format\":\"md|txt|csv|json|ndjson|docx\"},\"formats\":[\"md\",\"txt\",\"csv\",\"json\",\"ndjson\",\"docx\"],\"config\":" + cfg_status_json() + ",\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + ",\"qdrant_url\":\"" + jesc(qdrant_url()) + "\"}")
+    out_ok("{\"name\":\"machin-rag\",\"version\":\"" + app_version() + "\",\"commands\":[\"status\",\"collections\",\"ingest\",\"query\",\"serve\",\"version\",\"help\",\"help-json\"],\"flags\":{\"-c\":\"collection\",\"-t\":\"text\",\"-f\":\"file\",\"-q\":\"query\",\"-k\":\"top_k\",\"-port\":\"serve port\",\"-format\":\"md|txt|csv|json|ndjson|docx|pdf\"},\"formats\":[\"md\",\"txt\",\"csv\",\"json\",\"ndjson\",\"docx\",\"pdf\"],\"config\":" + cfg_status_json() + ",\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + ",\"qdrant_url\":\"" + jesc(qdrant_url()) + "\"}")
 }
 
 func cmd_status() {
     ok, detail := qdrant_ready()
     q := "down"
     if ok == 1 { q = "up" }
-    out_ok("{\"qdrant\":\"" + q + "\",\"qdrant_url\":\"" + jesc(qdrant_url()) + "\",\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + ",\"formats\":[\"md\",\"txt\",\"csv\",\"json\",\"ndjson\",\"docx\"],\"config\":" + cfg_status_json() + "}")
+    out_ok("{\"qdrant\":\"" + q + "\",\"qdrant_url\":\"" + jesc(qdrant_url()) + "\",\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + ",\"formats\":[\"md\",\"txt\",\"csv\",\"json\",\"ndjson\",\"docx\",\"pdf\"],\"config\":" + cfg_status_json() + "}")
 }
 
 func cmd_collections() {
@@ -119,7 +119,7 @@ func main() {
     fs = flag_str(fs, "q", "q", "", "query text")
     fs = flag_int(fs, "k", "k", "5", "top_k")
     fs = flag_int(fs, "port", "p", "0", "serve port")
-    fs = flag_str(fs, "format", "F", "", "force format: md|txt|csv|json|ndjson|docx")
+    fs = flag_str(fs, "format", "F", "", "force format: md|txt|csv|json|ndjson|docx|pdf")
     fs = flag_str(fs, "qdrant-url", "Q", "", "override Qdrant URL")
     fs = parse_flags(fs, args())
 

@@ -54,8 +54,8 @@
               <span class="text-2xl">📎</span>
             </div>
             <div>
-              <h3 class="text-xl font-semibold text-white mb-2">DOCX ingest (v0.3→v0.4)</h3>
-              <p class="text-white/40 leading-relaxed">Native OOXML: ZIP+deflate, reading-order walk with headings/tables, image rels resolved to alt text + sha256/size/content-type in payload. OCR still later.</p>
+              <h3 class="text-xl font-semibold text-white mb-2">DOCX + PDF (v0.4→v0.5)</h3>
+              <p class="text-white/40 leading-relaxed">DOCX adds hyperlinks and headers/footers/footnotes. PDF text-layer ingest via poppler-cpp (page chunks, title meta) — still no OCR.</p>
             </div>
           </div>
         </div>

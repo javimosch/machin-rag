@@ -1,6 +1,6 @@
 // api.src — HTTP handlers + agent-first JSON envelope helpers.
 
-func app_version() (v) { v = "0.4.0" }
+func app_version() (v) { v = "0.5.0" }
 
 func eprint(s) { n := write(2, s + "\n") }
 
@@ -34,7 +34,7 @@ type IngestReq struct {
 type QueryReq struct { collection string  q string  top_k int }
 
 func handle_health(req) (res) {
-    res = api_ok("{\"status\":\"healthy\",\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + ",\"formats\":[\"md\",\"txt\",\"csv\",\"json\",\"ndjson\",\"docx\"]}")
+    res = api_ok("{\"status\":\"healthy\",\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + ",\"formats\":[\"md\",\"txt\",\"csv\",\"json\",\"ndjson\",\"docx\",\"pdf\"]}")
 }
 
 func handle_status(req) (res) {

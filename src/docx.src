@@ -1,8 +1,9 @@
-// docx.src — OOXML parse/ingest (phase 2 walk + chunking).
+// docx.src — OOXML parse/ingest (phase 2–3 walk + chunking).
+// Phase 3: hyperlinks inline; headers/footers/footnotes/endnotes appended.
 // Low-level ZIP/XML helpers live in docx_io.src.
 
 // Walk document.xml in order → body text + JSON array of image objects.
-func docx_walk(path, xml, rels_js) (body, images_js) {
+func docx_walk(path, xml, rels_js, link_js) (body, images_js) {
     body = ""
     images_js = "["
     img_first := 1
@@ -28,7 +29,6 @@ func docx_walk(path, xml, rels_js) (body, images_js) {
         // paragraph
         if i + 4 <= n {
             if substr(xml, i, i + 4) == "<w:p" {
-                // ensure <w:p or <w:p>
                 okp := 0
                 if i + 4 == n { okp = 1 }
                 if i + 4 < n {
@@ -39,7 +39,6 @@ func docx_walk(path, xml, rels_js) (body, images_js) {
                     end := index_from(xml, "</w:p>", i)
                     if end < 0 { break }
                     para := substr(xml, i, end + 6)
-                    // heading style?
                     heading = ""
                     ps := index(para, "<w:pStyle")
                     if ps >= 0 {
@@ -54,23 +53,53 @@ func docx_walk(path, xml, rels_js) (body, images_js) {
                             }
                         }
                     }
-                    // inline images in this paragraph (reading order vs text: scan linearly)
-                    // Collect text runs and embeds in order within para
                     pi := 0
                     pn := len(para)
                     line := ""
                     while pi < pn {
-                        // image embed
                         emb := index_from(para, "r:embed=\"", pi)
+                        hl := index_from(para, "<w:hyperlink", pi)
                         wt := index_from(para, "<w:t", pi)
-                        use_emb := 0
+                        // pick earliest of hyperlink / embed / w:t
+                        next_kind := ""
+                        next_pos := -1
+                        if hl >= 0 { next_kind = "hl"; next_pos = hl }
                         if emb >= 0 {
-                            if wt < 0 { use_emb = 1 }
-                            if wt >= 0 {
-                                if emb < wt { use_emb = 1 }
-                            }
+                            if next_pos < 0 || emb < next_pos { next_kind = "emb"; next_pos = emb }
                         }
-                        if use_emb == 1 {
+                        if wt >= 0 {
+                            if next_pos < 0 || wt < next_pos { next_kind = "wt"; next_pos = wt }
+                        }
+                        if next_kind == "" { break }
+                        if next_kind == "hl" {
+                            tag_end := index_from(para, ">", hl)
+                            if tag_end < 0 { break }
+                            open_tag := substr(para, hl, tag_end + 1)
+                            rid := xml_attr(open_tag, "r:id")
+                            if rid == "" { rid = xml_attr(open_tag, "id") }
+                            close_at := index_from(para, "</w:hyperlink>", tag_end)
+                            if close_at < 0 { break }
+                            region := substr(para, hl, close_at)
+                            htext := trim(extract_wt_text(region))
+                            url := ""
+                            if rid != "" {
+                                raw, err := json_get(link_js, "." + rid)
+                                if err == "" { url = cfg_unquote(raw) }
+                            }
+                            if url == "" {
+                                anchor := xml_attr(open_tag, "w:anchor")
+                                if anchor == "" { anchor = xml_attr(open_tag, "anchor") }
+                                if anchor != "" { url = "#" + anchor }
+                            }
+                            piece := htext
+                            if url != "" {
+                                if piece != "" { piece = piece + " <" + url + ">" } else { piece = "<" + url + ">" }
+                            }
+                            if piece != "" { line = line + piece }
+                            pi = close_at + 15
+                            continue
+                        }
+                        if next_kind == "emb" {
                             a0 := emb + 9
                             a1 := index_from(para, "\"", a0)
                             if a1 < 0 { break }
@@ -93,34 +122,32 @@ func docx_walk(path, xml, rels_js) (body, images_js) {
                             stub := image_stub_line(base, alt, sha, sz, ct)
                             if line != "" { line = line + " " }
                             line = line + stub
-                            // record image object
                             if img_first == 0 { images_js = images_js + "," }
                             images_js = images_js + "{\"rid\":\"" + jesc(rid) + "\",\"path\":\"" + jesc(media) + "\",\"name\":\"" + jesc(base) + "\",\"alt\":\"" + jesc(alt) + "\",\"sha256\":\"" + jesc(sha) + "\",\"bytes\":" + str(sz) + ",\"content_type\":\"" + jesc(ct) + "\"}"
                             img_first = 0
                             pi = a1 + 1
                             continue
                         }
-                        if wt >= 0 {
-                            if is_wt_open(para, wt) == 0 {
-                                pi = wt + 4
-                                continue
-                            }
-                            j := wt + 4
-                            while j < pn {
-                                if substr(para, j, j + 1) == ">" { break }
-                                j = j + 1
-                            }
-                            if j >= pn { break }
-                            if substr(para, j - 1, j) == "/" { pi = j + 1; continue }
-                            start := j + 1
-                            endt := index_from(para, "</w:t>", start)
-                            if endt < 0 { break }
-                            piece := xml_decode_entities(substr(para, start, endt))
-                            line = line + piece
-                            pi = endt + 6
+                        // w:t
+                        if is_wt_open(para, wt) == 0 {
+                            pi = wt + 4
                             continue
                         }
-                        break
+                        // skip w:t that lives inside a hyperlink (already consumed)
+                        // (hyperlink branch runs first when hl < wt)
+                        j := wt + 4
+                        while j < pn {
+                            if substr(para, j, j + 1) == ">" { break }
+                            j = j + 1
+                        }
+                        if j >= pn { break }
+                        if substr(para, j - 1, j) == "/" { pi = j + 1; continue }
+                        start := j + 1
+                        endt := index_from(para, "</w:t>", start)
+                        if endt < 0 { break }
+                        piece := xml_decode_entities(substr(para, start, endt))
+                        line = line + piece
+                        pi = endt + 6
                     }
                     line = trim(line)
                     if line != "" {
@@ -160,10 +187,22 @@ func parse_docx_file(path) (chunks) {
     ok, xml := zip_read_string(path, "word/document.xml")
     if ok == 0 { return }
     rels_js := "{}"
+    link_js := "{}"
     rok, rels_xml := zip_read_string(path, "word/_rels/document.xml.rels")
-    if rok == 1 { rels_js = parse_docx_rels(rels_xml) }
+    if rok == 1 {
+        rels_js = parse_docx_rels(rels_xml)
+        link_js = parse_docx_link_rels(rels_xml)
+    }
     title, creator := docx_core_props(path)
-    body, images_js := docx_walk(path, xml, rels_js)
+    body, images_js := docx_walk(path, xml, rels_js, link_js)
+    // phase 3: headers / footers / footnotes / endnotes
+    if rok == 1 {
+        aux := docx_collect_aux(path, rels_xml)
+        if aux != "" {
+            if body != "" { body = body + "\n\n" }
+            body = body + aux
+        }
+    }
     img_paths := images_paths_json(images_js)
 
     // fallback: media not referenced via rels still listed

@@ -1,0 +1,101 @@
+// pdf.src — PDF text-layer ingest via poppler-cpp (no OCR).
+
+extern "mrpdf" {
+    // system often has libpoppler-cpp.so.0 without the unversioned .so symlink
+    cflags "-Ivendor/poppler/cpp -L/usr/lib/x86_64-linux-gnu native/mr_pdf.cpp"
+    link ":libpoppler-cpp.so.0"
+    link "stdc++"
+    fn mr_pdf_page_count(string) int
+    fn mr_pdf_title(string, ptr, int) int
+    fn mr_pdf_page_text(string, int, ptr, int) int
+}
+
+func pdf_title(path) (title) {
+    title = ""
+    buf := alloc(4096)
+    if buf == 0 { return }
+    n := mr_pdf_title(path, buf, 4096)
+    if n >= 0 { title = ptr_str(buf) }
+    free(buf)
+}
+
+func pdf_page_text(path, page0) (ok, text) {
+    ok = 0
+    text = ""
+    // 4 MiB per page cap
+    cap := 4194304
+    buf := alloc(cap)
+    if buf == 0 { return }
+    n := mr_pdf_page_text(path, page0, buf, cap)
+    if n < 0 { free(buf); return }
+    text = ptr_str(buf)
+    free(buf)
+    ok = 1
+}
+
+func parse_pdf_file(path) (chunks) {
+    chunks = []Chunk{}
+    n := mr_pdf_page_count(path)
+    if n < 0 { return }
+    title := pdf_title(path)
+    maxc := cfg_md_max()
+    if maxc <= 0 { maxc = 2000 }
+    p := 0
+    while p < n {
+        ok, page_text := pdf_page_text(path, p)
+        p = p + 1
+        if ok == 0 { continue }
+        page_text = trim(page_text)
+        if page_text == "" { continue }
+        base_meta := "\"source\":\"" + jesc(path) + "\",\"format\":\"pdf\",\"title\":\"" + jesc(title) + "\",\"page\":" + str(p)
+        if len(page_text) <= maxc {
+            meta := "{" + base_meta + "}"
+            chunks = append(chunks, chunk_make(page_text, meta))
+            continue
+        }
+        // hard-split long pages
+        paras := split(page_text, "\n")
+        buf := ""
+        part := 0
+        for _, line := range paras {
+            cand := line
+            if buf != "" { cand = buf + "\n" + line }
+            if len(cand) > maxc {
+                if trim(buf) != "" {
+                    meta := "{" + base_meta + ",\"part\":" + str(part) + "}"
+                    chunks = append(chunks, chunk_make(trim(buf), meta))
+                    part = part + 1
+                    buf = line
+                    continue
+                }
+            }
+            buf = cand
+        }
+        if trim(buf) != "" {
+            meta := "{" + base_meta + ",\"part\":" + str(part) + "}"
+            chunks = append(chunks, chunk_make(trim(buf), meta))
+        }
+    }
+}
+
+func ingest_pdf(coll, path) (ok, detail) {
+    chunks := parse_pdf_file(path)
+    if len(chunks) == 0 {
+        ok = 0
+        detail = "pdf parse failed (missing/locked/no text layer): " + path
+        return
+    }
+    kept := []Chunk{}
+    for _, c := range chunks {
+        c2 := normalize_chunk(c)
+        if drop_empty_chunk(c2) == 1 {
+            kept = append(kept, c2)
+        }
+    }
+    if len(kept) == 0 {
+        ok = 0
+        detail = "no chunks after pdf parse/normalize"
+        return
+    }
+    ok, detail = upsert_chunks(coll, kept)
+}

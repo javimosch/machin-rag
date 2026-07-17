@@ -108,7 +108,15 @@ func zip_list_prefix(path, prefix) (ok, names) {
     ok = 1
 }
 
-// Relationship Id → word/-relative zip path (JSON object string).
+func word_rel_path(target) (path) {
+    path = target
+    if has_prefix(path, "/") { path = substr(path, 1, len(path)) }
+    if has_prefix(path, "word/") == false {
+        path = "word/" + path
+    }
+}
+
+// Image Relationship Id → word/-relative zip path (JSON object).
 func parse_docx_rels(rels_xml) (js) {
     js = "{"
     first := 1
@@ -126,22 +134,150 @@ func parse_docx_rels(rels_xml) (js) {
         typ := xml_attr(tag, "Type")
         i = end + 1
         if id == "" || target == "" { continue }
-        // only image relationships (and any Target under media/)
         use := 0
         if index(typ, "/image") >= 0 { use = 1 }
         if index(to_lower(target), "media/") >= 0 { use = 1 }
         if use == 0 { continue }
-        // Target is relative to word/
-        path := target
-        if has_prefix(path, "/") { path = substr(path, 1, len(path)) }
-        if has_prefix(path, "word/") == false {
-            if has_prefix(path, "media/") { path = "word/" + path }
-        }
+        path := word_rel_path(target)
         if first == 0 { js = js + "," }
         js = js + "\"" + jesc(id) + "\":\"" + jesc(path) + "\""
         first = 0
     }
     js = js + "}"
+}
+
+// External hyperlink Relationship Id → URL (JSON object).
+func parse_docx_link_rels(rels_xml) (js) {
+    js = "{"
+    first := 1
+    i := 0
+    n := len(rels_xml)
+    while i < n {
+        p := index_from(rels_xml, "<Relationship", i)
+        if p < 0 { break }
+        end := index_from(rels_xml, "/>", p)
+        if end < 0 { end = index_from(rels_xml, ">", p) }
+        if end < 0 { break }
+        tag := substr(rels_xml, p, end)
+        id := xml_attr(tag, "Id")
+        target := xml_attr(tag, "Target")
+        typ := xml_attr(tag, "Type")
+        i = end + 1
+        if id == "" || target == "" { continue }
+        if index(typ, "/hyperlink") < 0 { continue }
+        if first == 0 { js = js + "," }
+        js = js + "\"" + jesc(id) + "\":\"" + jesc(target) + "\""
+        first = 0
+    }
+    js = js + "}"
+}
+
+// Paths of header/footer/footnotes/endnotes parts from document rels.
+func parse_docx_aux_parts(rels_xml) (paths) {
+    paths = []string{}
+    i := 0
+    n := len(rels_xml)
+    while i < n {
+        p := index_from(rels_xml, "<Relationship", i)
+        if p < 0 { break }
+        end := index_from(rels_xml, "/>", p)
+        if end < 0 { end = index_from(rels_xml, ">", p) }
+        if end < 0 { break }
+        tag := substr(rels_xml, p, end)
+        target := xml_attr(tag, "Target")
+        typ := to_lower(xml_attr(tag, "Type"))
+        i = end + 1
+        if target == "" { continue }
+        kind := ""
+        if index(typ, "/header") >= 0 { kind = "header" }
+        if index(typ, "/footer") >= 0 { kind = "footer" }
+        if index(typ, "/footnotes") >= 0 { kind = "footnotes" }
+        if index(typ, "/endnotes") >= 0 { kind = "endnotes" }
+        if kind == "" { continue }
+        paths = append(paths, kind + "|" + word_rel_path(target))
+    }
+}
+
+func docx_part_label(kind) (label) {
+    label = kind
+    if kind == "header" { label = "Header" }
+    if kind == "footer" { label = "Footer" }
+    if kind == "footnotes" { label = "Footnotes" }
+    if kind == "endnotes" { label = "Endnotes" }
+}
+
+// Plain text from an OOXML part (headers/footers/notes), one para per line.
+func docx_part_text(xml) (text) {
+    text = ""
+    // skip footnote/endnote separators
+    i := 0
+    n := len(xml)
+    while i < n {
+        // footnote/endnote block with type=separator|continuationSeparator
+        if substr(xml, i, i + 10) == "<w:footnote" || substr(xml, i, i + 9) == "<w:endnote" {
+            tag_end := index_from(xml, ">", i)
+            if tag_end < 0 { break }
+            open_tag := substr(xml, i, tag_end + 1)
+            typ := xml_attr(open_tag, "w:type")
+            if typ == "" { typ = xml_attr(open_tag, "type") }
+            close_tag := "</w:footnote>"
+            if substr(xml, i, i + 10) == "<w:endnote" { close_tag = "</w:endnote>" }
+            close_at := index_from(xml, close_tag, tag_end)
+            if close_at < 0 { break }
+            if typ == "separator" || typ == "continuationSeparator" {
+                i = close_at + len(close_tag)
+                continue
+            }
+            block := substr(xml, i, close_at)
+            t := trim(extract_wt_text(block))
+            if t != "" {
+                if text != "" { text = text + "\n" }
+                text = text + t
+            }
+            i = close_at + len(close_tag)
+            continue
+        }
+        if i + 4 <= n {
+            if substr(xml, i, i + 4) == "<w:p" {
+                okp := 0
+                if i + 4 < n {
+                    ch := substr(xml, i + 4, i + 5)
+                    if ch == " " || ch == ">" || ch == "/" || ch == "\n" || ch == "\r" || ch == "\t" { okp = 1 }
+                }
+                if okp == 1 {
+                    end := index_from(xml, "</w:p>", i)
+                    if end < 0 { break }
+                    t := trim(extract_wt_text(substr(xml, i, end)))
+                    if t != "" {
+                        if text != "" { text = text + "\n" }
+                        text = text + t
+                    }
+                    i = end + 6
+                    continue
+                }
+            }
+        }
+        i = i + 1
+    }
+    text = trim(text)
+}
+
+func docx_collect_aux(path, rels_xml) (text) {
+    text = ""
+    parts := parse_docx_aux_parts(rels_xml)
+    for _, item := range parts {
+        bar := index(item, "|")
+        if bar < 0 { continue }
+        kind := substr(item, 0, bar)
+        part_path := substr(item, bar + 1, len(item))
+        ok, xml := zip_read_string(path, part_path)
+        if ok == 0 { continue }
+        body := docx_part_text(xml)
+        if body == "" { continue }
+        label := docx_part_label(kind)
+        if text != "" { text = text + "\n\n" }
+        text = text + "## " + label + "\n" + body
+    }
 }
 
 func docx_core_props(path) (title, creator) {

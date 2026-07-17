@@ -27,7 +27,7 @@ mkdir -p ~/.machin-rag && cp config.example.json ~/.machin-rag/config.json   # o
 
 Config: `~/.machin-rag/config.json` → env → CLI. Env: `QDRANT_URL` (default `http://127.0.0.1:6333`), `PORT` (serve, default `7091`).
 
-## Formats (v0.4)
+## Formats (v0.5)
 
 | Format | Detection | Chunking |
 |--------|-----------|----------|
@@ -36,9 +36,12 @@ Config: `~/.machin-rag/config.json` → env → CLI. Env: `QDRANT_URL` (default 
 | `csv` | `.csv` | one chunk per row (header → fields) |
 | `json` | `.json` | array of objects or single object |
 | `ndjson` | `.ndjson` / `.jsonl` | one object per line |
-| `docx` | `.docx` | OOXML walk: headings, tables, inline images (rels + alt/sha256) |
+| `docx` | `.docx` | OOXML: headings/tables/images/links + headers/notes |
+| `pdf` | `.pdf` | text-layer pages via poppler-cpp (no OCR) |
 
-Force with `-F` / `--format` or API `"format"`. PDF not yet. Build needs **zlib** + **OpenSSL libcrypto**.
+Force with `-F` / `--format` or API `"format"`.
+
+**Build/runtime:** zlib + OpenSSL libcrypto; PDF needs system `libpoppler-cpp` (`libpoppler-cpp0v5` on Ubuntu). Headers vendored under `vendor/poppler/cpp/`.
 
 ## Agent contract
 
@@ -70,8 +73,10 @@ MVP uses **feature hashing** over `sha256` tokens → 64-d cosine vectors (`hash
 
 ```
 machin-rag/
-├── src/                 # MFL: config, parsers, docx_io/docx, chunk, embed, qdrant, api, main
-├── native/mr_zip.c      # ZIP extract + sha256 for DOCX (zlib + libcrypto)
+├── src/                 # MFL: config, parsers, docx*, pdf, chunk, embed, qdrant, api, main
+├── native/mr_zip.c      # ZIP + sha256 (zlib + libcrypto)
+├── native/mr_pdf.cpp    # PDF text-layer (poppler-cpp)
+├── vendor/poppler/cpp/  # poppler-cpp headers
 ├── ui/index.html        # Vue 3 CDN (embedded at build)
 ├── config.example.json  # → ~/.machin-rag/config.json
 ├── compose.yml          # Qdrant only
