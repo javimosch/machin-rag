@@ -15,13 +15,29 @@ Agents need **ingest → query → JSON** with free local embeddings and no pane
 docker compose up -d
 ./build.sh
 
+mkdir -p ~/.machin-rag && cp config.example.json ~/.machin-rag/config.json   # optional
+
 ./machin-rag status
 ./machin-rag ingest -c docs -t "machin compiles MFL through C to one native binary"
+./machin-rag ingest -c docs -f notes.md
+./machin-rag ingest -c docs -f rows.csv
 ./machin-rag query  -c docs -q "native binary" -k 3
 ./machin-rag serve            # http://localhost:7091  (Vue UI + /api/*)
 ```
 
-Env: `QDRANT_URL` (default `http://127.0.0.1:6333`), `PORT` (serve, default `7091`).
+Config: `~/.machin-rag/config.json` → env → CLI. Env: `QDRANT_URL` (default `http://127.0.0.1:6333`), `PORT` (serve, default `7091`).
+
+## Formats (v0.2)
+
+| Format | Detection | Chunking |
+|--------|-----------|----------|
+| `md` | `.md` / headings | by `#` sections + size/overlap |
+| `txt` | default / `-t` | size/overlap |
+| `csv` | `.csv` | one chunk per row (header → fields) |
+| `json` | `.json` | array of objects or single object |
+| `ndjson` | `.ndjson` / `.jsonl` | one object per line |
+
+Force with `-F` / `--format` or API `"format"`. PDF/DOCX not yet.
 
 ## Agent contract
 
@@ -41,7 +57,7 @@ Commands: `status` · `collections` · `ingest` · `query` · `serve` · `versio
 | GET | `/api/health` | |
 | GET | `/api/status` | |
 | GET | `/api/collections` | |
-| POST | `/api/ingest` | `{"collection","text"}` or `{"collection","file"}` |
+| POST | `/api/ingest` | `{"collection","text"|"file","format?"}` |
 | POST | `/api/query` | `{"collection","q","top_k?"}` |
 | GET | `/` | Vue 3 UI |
 
@@ -53,9 +69,10 @@ MVP uses **feature hashing** over `sha256` tokens → 64-d cosine vectors (`hash
 
 ```
 machin-rag/
-├── src/          # MFL: machweb, flags, embed, qdrant, api, main
-├── ui/index.html # Vue 3 CDN (embedded at build)
-├── compose.yml   # Qdrant only
+├── src/                 # MFL: config, parsers, chunk, embed, qdrant, api, main
+├── ui/index.html        # Vue 3 CDN (embedded at build)
+├── config.example.json  # → ~/.machin-rag/config.json
+├── compose.yml          # Qdrant only
 ├── build.sh
 └── AGENTS.md
 ```

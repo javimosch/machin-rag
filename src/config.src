@@ -1,0 +1,100 @@
+// config.src — load ~/.machin-rag/config.json, then env, then CLI overlays.
+// Precedence (highest last): file → env → CLI.
+
+var CFG_RAW = "{}"
+var CFG_CLI_QDRANT = ""
+var CFG_CLI_FORMAT = ""
+var CFG_SOURCE = ""
+
+func cfg_home() (p) {
+    p = env("HOME")
+    if p == "" { p = "." }
+    p = p + "/.machin-rag"
+}
+
+func cfg_path() (p) { p = cfg_home() + "/config.json" }
+
+func cfg_unquote(s) (r) {
+    r = s
+    if len(s) >= 2 {
+        if substr(s, 0, 1) == "\"" {
+            r = substr(s, 1, len(s) - 1)
+            r = replace(r, "\\\"", "\"")
+            r = replace(r, "\\\\", "\\")
+        }
+    }
+}
+
+func cfg_load_file() {
+    path := cfg_path()
+    raw := read_file(path)
+    if raw != "" {
+        CFG_RAW = raw
+        CFG_SOURCE = path
+    } else {
+        CFG_RAW = "{}"
+        CFG_SOURCE = "(defaults)"
+    }
+}
+
+// String from config JSON path, or def if missing.
+func cfg_str(path, def) (v) {
+    v = def
+    raw, err := json_get(CFG_RAW, path)
+    if err == "" {
+        if raw != "" {
+            if raw != "null" { v = cfg_unquote(raw) }
+        }
+    }
+}
+
+func cfg_int(path, def) (n) {
+    n = def
+    raw, err := json_get(CFG_RAW, path)
+    if err == "" {
+        if raw != "" {
+            if raw != "null" { n = parse_int(cfg_unquote(raw)) }
+        }
+    }
+}
+
+func cfg_bool(path, def) (b) {
+    b = def
+    raw, err := json_get(CFG_RAW, path)
+    if err == "" {
+        u := cfg_unquote(raw)
+        if u == "true" || u == "1" { b = 1 }
+        if u == "false" || u == "0" { b = 0 }
+    }
+}
+
+// Effective qdrant URL: CLI overlay → env → file → default.
+func cfg_qdrant_url() (u) {
+    u = CFG_CLI_QDRANT
+    if u == "" { u = env("QDRANT_URL") }
+    if u == "" { u = env("MACHIN_RAG_QDRANT_URL") }
+    if u == "" { u = cfg_str(".qdrant_url", "") }
+    if u == "" { u = "http://127.0.0.1:6333" }
+}
+
+func cfg_format_override() (f) {
+    f = CFG_CLI_FORMAT
+    if f == "" { f = env("MACHIN_RAG_FORMAT") }
+    if f == "" { f = cfg_str(".format", "") }
+}
+
+func cfg_md_max() (n) { n = cfg_int(".md.max_chars", 0)  if n <= 0 { n = cfg_int(".chunk.max_chars", 2000) }  if n <= 0 { n = 2000 } }
+func cfg_md_overlap() (n) { n = cfg_int(".md.overlap_pct", 0)  if n <= 0 { n = cfg_int(".chunk.overlap_pct", 20) } }
+func cfg_csv_delim() (d) { d = cfg_str(".csv.delimiter", ",")  if d == "" { d = "," } }
+func cfg_csv_id_col() (c) { c = cfg_str(".csv.id_column", "") }
+func cfg_json_text_fields() (s) { s = cfg_str(".json.text_fields", "") }
+func cfg_normalize_template() (t) { t = cfg_str(".normalize.template", "") }
+func cfg_normalize_drop_empty() (b) { b = cfg_bool(".normalize.drop_empty", 1) }
+
+func cfg_init() {
+    cfg_load_file()
+}
+
+func cfg_status_json() (j) {
+    j = "{\"config_path\":\"" + jesc(cfg_path()) + "\",\"config_source\":\"" + jesc(CFG_SOURCE) + "\",\"qdrant_url\":\"" + jesc(cfg_qdrant_url()) + "\",\"md_max_chars\":" + str(cfg_md_max()) + ",\"csv_delimiter\":\"" + jesc(cfg_csv_delim()) + "\"}"
+}

@@ -1,7 +1,4 @@
 // main.src — agent-first CLI + HTTP server for machin-rag.
-//
-// Commands (JSON on stdout unless serve):
-//   status | collections | ingest | query | serve | help | help-json | version
 
 func usage() {
     println("machin-rag — agent-first local RAG (Qdrant + tiny hash embedder)")
@@ -9,27 +6,27 @@ func usage() {
     println("usage: machin-rag <command> [flags]")
     println("")
     println("commands:")
-    println("  status                 qdrant reachability + embed info (JSON)")
+    println("  status                 qdrant + config (JSON)")
     println("  collections            list qdrant collections (JSON)")
-    println("  ingest -c NAME -t TXT  upsert one text chunk")
-    println("  ingest -c NAME -f PATH upsert file contents")
-    println("  query  -c NAME -q TXT [-k N]  similarity search")
+    println("  ingest -c NAME -t TXT [-format md|csv|json|ndjson|txt]")
+    println("  ingest -c NAME -f PATH [-format …]   parse by extension or -format")
+    println("  query  -c NAME -q TXT [-k N]")
     println("  serve  [-port N]       HTTP API + Vue UI (default :7091)")
-    println("  version")
-    println("  help | help-json")
+    println("  version | help | help-json")
     println("")
-    println("env: QDRANT_URL (default http://127.0.0.1:6333)  PORT")
+    println("config: ~/.machin-rag/config.json  then  env  then  CLI")
+    println("env: QDRANT_URL | MACHIN_RAG_QDRANT_URL | MACHIN_RAG_FORMAT | PORT")
 }
 
 func help_json() {
-    out_ok("{\"name\":\"machin-rag\",\"version\":\"" + app_version() + "\",\"commands\":[\"status\",\"collections\",\"ingest\",\"query\",\"serve\",\"version\",\"help\",\"help-json\"],\"flags\":{\"-c\":\"collection\",\"-t\":\"text\",\"-f\":\"file\",\"-q\":\"query\",\"-k\":\"top_k\",\"-port\":\"serve port\"},\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + ",\"qdrant_url\":\"" + jesc(qdrant_url()) + "\"}")
+    out_ok("{\"name\":\"machin-rag\",\"version\":\"" + app_version() + "\",\"commands\":[\"status\",\"collections\",\"ingest\",\"query\",\"serve\",\"version\",\"help\",\"help-json\"],\"flags\":{\"-c\":\"collection\",\"-t\":\"text\",\"-f\":\"file\",\"-q\":\"query\",\"-k\":\"top_k\",\"-port\":\"serve port\",\"-format\":\"md|txt|csv|json|ndjson\"},\"formats\":[\"md\",\"txt\",\"csv\",\"json\",\"ndjson\"],\"config\":" + cfg_status_json() + ",\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + ",\"qdrant_url\":\"" + jesc(qdrant_url()) + "\"}")
 }
 
 func cmd_status() {
     ok, detail := qdrant_ready()
     q := "down"
     if ok == 1 { q = "up" }
-    out_ok("{\"qdrant\":\"" + q + "\",\"qdrant_url\":\"" + jesc(qdrant_url()) + "\",\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + "\"}")
+    out_ok("{\"qdrant\":\"" + q + "\",\"qdrant_url\":\"" + jesc(qdrant_url()) + "\",\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + ",\"formats\":[\"md\",\"txt\",\"csv\",\"json\",\"ndjson\"],\"config\":" + cfg_status_json() + "}")
 }
 
 func cmd_collections() {
@@ -42,13 +39,18 @@ func cmd_ingest(fs) {
     coll := flag_get(fs, "c")
     text := flag_get(fs, "t")
     file := flag_get(fs, "f")
+    fmt := flag_get(fs, "format")
+    if fmt == "" { fmt = cfg_format_override() }
     if coll == "" { out_err(82, "validation", "need -c collection") }
+    ok := 0
+    detail := ""
     if file != "" {
-        text = read_file(file)
-        if text == "" { out_err(82, "validation", "empty or missing file") }
+        ok, detail = ingest_file(coll, file, fmt)
+    } else {
+        if text == "" { out_err(82, "validation", "need -t text or -f file") }
+        if fmt == "" { fmt = "txt" }
+        ok, detail = ingest_text(coll, text, "(inline)", fmt)
     }
-    if text == "" { out_err(82, "validation", "need -t text or -f file") }
-    ok, detail := upsert_point(coll, text)
     if ok == 0 { out_err(106, "qdrant", detail) }
     out_ok(detail)
 }
@@ -103,10 +105,13 @@ func cmd_serve(fs) {
     println("  UI:  http://localhost:" + str(port) + "/")
     println("  API: /api/health /api/status /api/collections /api/ingest /api/query")
     println("  Qdrant: " + qdrant_url() + "  embed: " + embed_provider())
+    println("  Config: " + cfg_path() + " (" + CFG_SOURCE + ")")
     serve(port, func(req) { return dispatch_rag(r, req) })
 }
 
 func main() {
+    cfg_init()
+
     fs := new_flags("machin-rag")
     fs = flag_str(fs, "c", "c", "", "collection name")
     fs = flag_str(fs, "t", "t", "", "text to ingest")
@@ -114,7 +119,15 @@ func main() {
     fs = flag_str(fs, "q", "q", "", "query text")
     fs = flag_int(fs, "k", "k", "5", "top_k")
     fs = flag_int(fs, "port", "p", "0", "serve port")
+    fs = flag_str(fs, "format", "F", "", "force format: md|txt|csv|json|ndjson")
+    fs = flag_str(fs, "qdrant-url", "Q", "", "override Qdrant URL")
     fs = parse_flags(fs, args())
+
+    // CLI overlays (highest precedence)
+    qu := flag_get(fs, "qdrant-url")
+    if qu != "" { CFG_CLI_QDRANT = qu }
+    fo := flag_get(fs, "format")
+    if fo != "" { CFG_CLI_FORMAT = fo }
 
     if flag_on(fs, "help") {
         usage()

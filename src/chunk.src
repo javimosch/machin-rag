@@ -1,0 +1,107 @@
+// chunk.src — Chunk model + ingest pipeline (detect → parse → normalize → upsert).
+
+type Chunk struct {
+    text string
+    meta string
+}
+
+func chunk_make(text, meta) (c) {
+    c = Chunk{text: text, meta: meta}
+}
+
+func ext_of(path) (e) {
+    e = ""
+    i := len(path) - 1
+    while i >= 0 {
+        ch := substr(path, i, i + 1)
+        if ch == "/" { break }
+        if ch == "." {
+            e = to_lower(substr(path, i + 1, len(path)))
+            break
+        }
+        i = i - 1
+    }
+}
+
+func detect_format(path, override) (fmt) {
+    fmt = to_lower(override)
+    if fmt != "" { return }
+    fmt = ext_of(path)
+    if fmt == "markdown" { fmt = "md" }
+    if fmt == "txt" { fmt = "md" }
+    if fmt == "" { fmt = "txt" }
+}
+
+// Apply declarative normalize.template using {{key}} from meta JSON + {{text}}.
+func normalize_chunk(c) (out) {
+    out = c
+    tmpl := cfg_normalize_template()
+    if tmpl == "" { return }
+    s := tmpl
+    s = replace(s, "{{text}}", c.text)
+    // Replace {{key}} for a few common keys from meta via json_get
+    keys := []string{"title", "heading", "id", "source", "format", "row", "name", "body", "content"}
+    for _, k := range keys {
+        raw, err := json_get(c.meta, "." + k)
+        if err == "" {
+            s = replace(s, "{{" + k + "}}", cfg_unquote(raw))
+        }
+    }
+    out.text = s
+}
+
+func drop_empty_chunk(c) (keep) {
+    keep = 1
+    if cfg_normalize_drop_empty() == 1 {
+        if trim(c.text) == "" { keep = 0 }
+    }
+}
+
+func parse_to_chunks(fmt, raw, source) (chunks) {
+    chunks = []Chunk{}
+    if fmt == "md" || fmt == "txt" {
+        chunks = parse_md(raw, source)
+        return
+    }
+    if fmt == "csv" {
+        chunks = parse_csv(raw, source)
+        return
+    }
+    if fmt == "json" || fmt == "ndjson" {
+        chunks = parse_json(raw, source, fmt)
+        return
+    }
+    // fallback: whole file as one chunk
+    meta := "{\"source\":\"" + jesc(source) + "\",\"format\":\"" + jesc(fmt) + "\"}"
+    chunks = append(chunks, chunk_make(raw, meta))
+}
+
+func ingest_text(coll, text, source, fmt) (ok, detail) {
+    if fmt == "" { fmt = "txt" }
+    chunks := parse_to_chunks(fmt, text, source)
+    // normalize + filter
+    kept := []Chunk{}
+    for _, c := range chunks {
+        c2 := normalize_chunk(c)
+        if drop_empty_chunk(c2) == 1 {
+            kept = append(kept, c2)
+        }
+    }
+    if len(kept) == 0 {
+        ok = 0
+        detail = "no chunks after parse/normalize"
+        return
+    }
+    ok, detail = upsert_chunks(coll, kept)
+}
+
+func ingest_file(coll, path, fmt_override) (ok, detail) {
+    raw := read_file(path)
+    if raw == "" {
+        ok = 0
+        detail = "empty or missing file: " + path
+        return
+    }
+    fmt := detect_format(path, fmt_override)
+    ok, detail = ingest_text(coll, raw, path, fmt)
+}

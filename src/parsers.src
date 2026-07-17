@@ -1,0 +1,226 @@
+// parsers.src — default md / csv / json(+ndjson) parsers → []Chunk.
+
+// ---- markdown / plain text ----
+
+func parse_md(raw, source) (chunks) {
+    chunks = []Chunk{}
+    maxc := cfg_md_max()
+    lines := split(raw, "\n")
+    title := ""
+    buf := ""
+    n := 0
+    for _, line := range lines {
+        t := trim(line)
+        is_h := 0
+        if has_prefix(t, "#") { is_h = 1 }
+        if is_h == 1 {
+            if trim(buf) != "" {
+                meta := "{\"source\":\"" + jesc(source) + "\",\"format\":\"md\",\"heading\":\"" + jesc(title) + "\",\"i\":" + str(n) + "}"
+                chunks = append(chunks, chunk_make(trim(buf), meta))
+                n = n + 1
+                buf = ""
+            }
+            title = trim(replace(t, "#", ""))
+            // strip leading # marks more carefully
+            title = t
+            while has_prefix(title, "#") { title = trim(substr(title, 1, len(title))) }
+            buf = title + "\n"
+            continue
+        }
+        buf = buf + line + "\n"
+        if len(buf) >= maxc {
+            meta := "{\"source\":\"" + jesc(source) + "\",\"format\":\"md\",\"heading\":\"" + jesc(title) + "\",\"i\":" + str(n) + "}"
+            chunks = append(chunks, chunk_make(trim(buf), meta))
+            n = n + 1
+            // crude overlap: keep tail
+            ov := cfg_md_overlap()
+            keep := (len(buf) * ov) / 100
+            if keep > 0 {
+                if keep < len(buf) { buf = substr(buf, len(buf) - keep, len(buf)) } else { buf = "" }
+            } else {
+                buf = ""
+            }
+        }
+    }
+    if trim(buf) != "" {
+        meta := "{\"source\":\"" + jesc(source) + "\",\"format\":\"md\",\"heading\":\"" + jesc(title) + "\",\"i\":" + str(n) + "}"
+        chunks = append(chunks, chunk_make(trim(buf), meta))
+    }
+    if len(chunks) == 0 {
+        meta := "{\"source\":\"" + jesc(source) + "\",\"format\":\"md\"}"
+        chunks = append(chunks, chunk_make(raw, meta))
+    }
+}
+
+// ---- CSV ----
+
+func csv_split_line(line, delim) (parts) {
+    parts = []string{}
+    cur := ""
+    in_q := 0
+    i := 0
+    n := len(line)
+    while i < n {
+        ch := substr(line, i, i + 1)
+        if ch == "\"" {
+            if in_q == 1 {
+                // "" escape?
+                if i + 1 < n {
+                    if substr(line, i + 1, i + 2) == "\"" {
+                        cur = cur + "\""
+                        i = i + 2
+                        continue
+                    }
+                }
+                in_q = 0
+                i = i + 1
+                continue
+            }
+            in_q = 1
+            i = i + 1
+            continue
+        }
+        if in_q == 0 {
+            if ch == delim {
+                parts = append(parts, cur)
+                cur = ""
+                i = i + 1
+                continue
+            }
+        }
+        cur = cur + ch
+        i = i + 1
+    }
+    parts = append(parts, cur)
+}
+
+func parse_csv(raw, source) (chunks) {
+    chunks = []Chunk{}
+    delim := cfg_csv_delim()
+    lines := split(raw, "\n")
+    if len(lines) == 0 { return }
+    header := csv_split_line(trim(lines[0]), delim)
+    idcol := cfg_csv_id_col()
+    // optional text_columns from config as comma-separated names in .csv.text_columns
+    text_cols_raw := cfg_str(".csv.text_columns", "")
+    text_cols := []string{}
+    if text_cols_raw != "" {
+        // allow JSON array in config: ["a","b"] or comma list
+        if has_prefix(text_cols_raw, "[") {
+            ti := 0
+            while ti < 64 {
+                tv, terr := json_get(text_cols_raw, "[" + str(ti) + "]")
+                if terr != "" { break }
+                text_cols = append(text_cols, cfg_unquote(tv))
+                ti = ti + 1
+            }
+        } else {
+            text_cols = split(text_cols_raw, ",")
+        }
+    }
+    r := 1
+    while r < len(lines) {
+        line := trim(lines[r])
+        r = r + 1
+        if line == "" { continue }
+        cols := csv_split_line(line, delim)
+        // build meta object + text
+        meta := "{\"source\":\"" + jesc(source) + "\",\"format\":\"csv\",\"row\":" + str(r - 1)
+        text := ""
+        ci := 0
+        while ci < len(header) {
+            key := trim(header[ci])
+            val := ""
+            if ci < len(cols) { val = cols[ci] }
+            meta = meta + ",\"" + jesc(key) + "\":\"" + jesc(val) + "\""
+            use := 0
+            if len(text_cols) == 0 { use = 1 }
+            for _, tc := range text_cols {
+                if trim(tc) == key { use = 1 }
+            }
+            if use == 1 {
+                if text != "" { text = text + "\n" }
+                text = text + key + ": " + val
+            }
+            ci = ci + 1
+        }
+        meta = meta + "}"
+        if idcol != "" {
+            // already in meta; text may still be built
+        }
+        if trim(text) == "" { text = line }
+        chunks = append(chunks, chunk_make(text, meta))
+    }
+}
+
+// ---- JSON / NDJSON ----
+
+func json_obj_text(obj) (text) {
+    text = ""
+    fields_csv := cfg_json_text_fields()
+    fields := []string{}
+    if fields_csv != "" {
+        if has_prefix(fields_csv, "[") {
+            fi := 0
+            while fi < 64 {
+                fv, ferr := json_get(fields_csv, "[" + str(fi) + "]")
+                if ferr != "" { break }
+                fields = append(fields, cfg_unquote(fv))
+                fi = fi + 1
+            }
+        } else {
+            fields = split(fields_csv, ",")
+        }
+    }
+    // default common fields if none configured
+    if len(fields) == 0 {
+        fields = []string{"text", "content", "body", "title", "name", "description"}
+    }
+    for _, f := range fields {
+        f = trim(f)
+        if f == "" { continue }
+        raw, err := json_get(obj, "." + f)
+        if err == "" {
+            if raw != "null" {
+                if text != "" { text = text + "\n" }
+                text = text + cfg_unquote(raw)
+            }
+        }
+    }
+    if trim(text) == "" { text = obj }
+}
+
+func parse_json(raw, source, fmt) (chunks) {
+    chunks = []Chunk{}
+    s := trim(raw)
+    if fmt == "ndjson" || (has_prefix(s, "{") == false && has_prefix(s, "[") == false) {
+        // NDJSON: one JSON object per line
+        lines := split(raw, "\n")
+        i := 0
+        for _, line := range lines {
+            line = trim(line)
+            if line == "" { continue }
+            text := json_obj_text(line)
+            meta := "{\"source\":\"" + jesc(source) + "\",\"format\":\"ndjson\",\"i\":" + str(i) + "}"
+            chunks = append(chunks, chunk_make(text, meta))
+            i = i + 1
+        }
+        return
+    }
+    if has_prefix(s, "[") {
+        i := 0
+        while i < 100000 {
+            obj, err := json_get(s, "[" + str(i) + "]")
+            if err != "" { break }
+            text := json_obj_text(obj)
+            meta := "{\"source\":\"" + jesc(source) + "\",\"format\":\"json\",\"i\":" + str(i) + "}"
+            chunks = append(chunks, chunk_make(text, meta))
+            i = i + 1
+        }
+        return
+    }
+    // single object
+    text := json_obj_text(s)
+    meta := "{\"source\":\"" + jesc(source) + "\",\"format\":\"json\"}"
+    chunks = append(chunks, chunk_make(text, meta))
+}

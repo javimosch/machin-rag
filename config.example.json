@@ -1,0 +1,23 @@
+{
+  "qdrant_url": "http://127.0.0.1:6333",
+  "chunk": {
+    "max_chars": 2000,
+    "overlap_pct": 20
+  },
+  "md": {
+    "max_chars": 2000,
+    "overlap_pct": 20
+  },
+  "csv": {
+    "delimiter": ",",
+    "text_columns": [],
+    "id_column": ""
+  },
+  "json": {
+    "text_fields": ["text", "content", "body", "title", "name", "description"]
+  },
+  "normalize": {
+    "template": "",
+    "drop_empty": true
+  }
+}

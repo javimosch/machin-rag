@@ -1,6 +1,6 @@
 // api.src — HTTP handlers + agent-first JSON envelope helpers.
 
-func app_version() (v) { v = "0.1.0" }
+func app_version() (v) { v = "0.2.0" }
 
 func eprint(s) { n := write(2, s + "\n") }
 
@@ -25,18 +25,23 @@ func api_err(code, msg) (r) {
     r = response(st, "application/json", "{\"ok\":false,\"error\":\"" + jesc(msg) + "\"}")
 }
 
-type IngestReq struct { collection string  text string  file string }
+type IngestReq struct {
+    collection string
+    text       string
+    file       string
+    format     string
+}
 type QueryReq struct { collection string  q string  top_k int }
 
 func handle_health(req) (res) {
-    res = api_ok("{\"status\":\"healthy\",\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + "}")
+    res = api_ok("{\"status\":\"healthy\",\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + ",\"formats\":[\"md\",\"txt\",\"csv\",\"json\",\"ndjson\"]}")
 }
 
 func handle_status(req) (res) {
     ok, detail := qdrant_ready()
     q := "down"
     if ok == 1 { q = "up" }
-    res = api_ok("{\"status\":\"running\",\"qdrant\":\"" + q + "\",\"qdrant_url\":\"" + jesc(qdrant_url()) + "\",\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + "\",\"version\":\"" + app_version() + "\"}")
+    res = api_ok("{\"status\":\"running\",\"qdrant\":\"" + q + "\",\"qdrant_url\":\"" + jesc(qdrant_url()) + "\",\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + "\",\"version\":\"" + app_version() + "\",\"config\":" + cfg_status_json() + "}")
 }
 
 func handle_collections(req) (res) {
@@ -49,13 +54,17 @@ func handle_ingest(req) (res) {
     if req.body == "" { return api_err(400, "body required") }
     r := parse(req.body, IngestReq{})
     if r.collection == "" { return api_err(400, "collection required") }
-    text := r.text
+    fmt := r.format
+    if fmt == "" { fmt = cfg_format_override() }
+    ok := 0
+    detail := ""
     if r.file != "" {
-        text = read_file(r.file)
-        if text == "" { return api_err(400, "empty or missing file") }
+        ok, detail = ingest_file(r.collection, r.file, fmt)
+    } else {
+        if r.text == "" { return api_err(400, "text or file required") }
+        if fmt == "" { fmt = "txt" }
+        ok, detail = ingest_text(r.collection, r.text, "(inline)", fmt)
     }
-    if text == "" { return api_err(400, "text or file required") }
-    ok, detail := upsert_point(r.collection, text)
     if ok == 0 { return api_err(502, detail) }
     res = api_ok(detail)
 }

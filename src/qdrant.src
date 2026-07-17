@@ -1,10 +1,6 @@
 // qdrant.src — thin HTTP client for a local Qdrant (REST).
-// Default: http://127.0.0.1:6333  (override with $QDRANT_URL).
 
-func qdrant_url() (u) {
-    u = env("QDRANT_URL")
-    if u == "" { u = "http://127.0.0.1:6333" }
-}
+func qdrant_url() (u) { u = cfg_qdrant_url() }
 
 func qdrant_headers() (h) {
     h = []string{"Content-Type: application/json"}
@@ -58,13 +54,11 @@ func ensure_collection(name) (ok, detail) {
     ok = 0
     detail = err
     if err != "" { return }
-    // 200 created, or 409 already exists — both fine
     if st == 200 || st == 201 || st == 409 {
         ok = 1
         detail = resp
         return
     }
-    // some qdrant versions return 200 with result status for exists
     if st >= 200 {
         if st < 300 {
             ok = 1
@@ -90,28 +84,66 @@ func list_collections() (ok, detail) {
     detail = "status=" + str(st) + " body=" + resp
 }
 
+// Upsert one text (compat helper).
 func upsert_point(coll, text) (ok, detail) {
+    meta := "{\"format\":\"txt\"}"
+    cs := []Chunk{}
+    cs = append(cs, chunk_make(text, meta))
+    ok, detail = upsert_chunks(coll, cs)
+}
+
+// Batch upsert chunks into a collection.
+func upsert_chunks(coll, chunks) (ok, detail) {
     eok, edet := ensure_collection(coll)
     if eok == 0 {
         ok = 0
         detail = "ensure_collection: " + edet
         return
     }
-    vec := embed_json(text)
-    id := point_id(text)
-    payload := "{\"points\":[{\"id\":" + str(id) + ",\"vector\":" + vec + ",\"payload\":{\"text\":\"" + jesc(text) + "\"}}]}"
-    st, resp, err := q_put("/collections/" + coll + "/points?wait=true", payload)
+    body := "{\"points\":["
+    i := 0
+    ids := []int{}
+    while i < len(chunks) {
+        c := chunks[i]
+        if i > 0 { body = body + "," }
+        vec := embed_json(c.text)
+        id := point_id(c.text + "|" + str(i) + "|" + c.meta)
+        ids = append(ids, id)
+        // merge meta JSON with text field
+        payload := c.meta
+        if payload == "" { payload = "{}" }
+        // inject text into payload: replace trailing }
+        if has_suffix(payload, "}") {
+            payload = substr(payload, 0, len(payload) - 1) + ",\"text\":\"" + jesc(c.text) + "\"}"
+        } else {
+            payload = "{\"text\":\"" + jesc(c.text) + "\"}"
+        }
+        body = body + "{\"id\":" + str(id) + ",\"vector\":" + vec + ",\"payload\":" + payload + "}"
+        i = i + 1
+    }
+    body = body + "]}"
+    st, resp, err := q_put("/collections/" + coll + "/points?wait=true", body)
     ok = 0
     detail = err
     if err != "" { return }
     if st >= 200 {
         if st < 300 {
             ok = 1
-            detail = "{\"id\":" + str(id) + ",\"qdrant\":" + resp + "}"
+            detail = "{\"count\":" + str(len(chunks)) + ",\"ids\":[" + join_ids(ids) + "],\"qdrant\":" + resp + "}"
             return
         }
     }
     detail = "status=" + str(st) + " body=" + resp
+}
+
+func join_ids(ids) (s) {
+    s = ""
+    i := 0
+    while i < len(ids) {
+        if i > 0 { s = s + "," }
+        s = s + str(ids[i])
+        i = i + 1
+    }
 }
 
 func search_points(coll, q, top_k) (ok, detail) {

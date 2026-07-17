@@ -35,3 +35,15 @@
             </div>
           </div>
         </div>
+
+        <div class="feature-card rounded-xl p-6">
+          <div class="flex items-start gap-4">
+            <div class="w-12 h-12 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+              <span class="text-2xl">📄</span>
+            </div>
+            <div>
+              <h3 class="text-xl font-semibold text-white mb-2">Structured ingest (v0.2)</h3>
+              <p class="text-white/40 leading-relaxed">Parse <code>md</code>, <code>csv</code>, <code>json</code>, and <code>ndjson</code> into chunks with a declarative normalize template. Config merges <code>~/.machin-rag/config.json</code> → env → CLI.</p>
+            </div>
+          </div>
+        </div>
