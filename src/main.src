@@ -26,7 +26,7 @@ func cmd_status() {
     ok, detail := qdrant_ready()
     q := "down"
     if ok == 1 { q = "up" }
-    out_ok("{\"qdrant\":\"" + q + "\",\"qdrant_url\":\"" + jesc(qdrant_url()) + "\",\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + ",\"formats\":[\"md\",\"txt\",\"csv\",\"json\",\"ndjson\",\"docx\",\"pdf\"],\"config\":" + cfg_status_json() + "}")
+    out_ok("{\"qdrant\":\"" + q + "\",\"qdrant_url\":\"" + jesc(qdrant_url()) + "\",\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + ",\"formats\":[\"md\",\"txt\",\"csv\",\"json\",\"ndjson\",\"docx\",\"pdf\"],\"ocr\":" + ocr_status_json() + ",\"deps\":{\"poppler_cpp\":\"required-for-pdf\",\"tesseract\":\"optional-for-ocr\"},\"config\":" + cfg_status_json() + "}")
 }
 
 func cmd_collections() {
@@ -51,7 +51,12 @@ func cmd_ingest(fs) {
         if fmt == "" { fmt = "txt" }
         ok, detail = ingest_text(coll, text, "(inline)", fmt)
     }
-    if ok == 0 { out_err(106, "qdrant", detail) }
+    if ok == 0 {
+        if index(detail, "images-only") >= 0 || index(detail, "OCR unavailable") >= 0 || index(detail, "libpoppler") >= 0 {
+            out_err(82, "validation", detail)
+        }
+        out_err(106, "qdrant", detail)
+    }
     out_ok(detail)
 }
 

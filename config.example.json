@@ -22,5 +22,11 @@
   },
   "docx": {
     "image_stubs": true
+  },
+  "ocr": {
+    "enabled": false,
+    "lang": "eng",
+    "min_text_chars": 40,
+    "images": "when_empty_alt"
   }
 }

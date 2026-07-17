@@ -223,6 +223,42 @@ int64_t mr_zip_sha256_hex(const char *zip_path, const char *entry_name, char *ou
     return result;
 }
 
+/* Extract entry to a filesystem path. Returns uncompressed size, or -1. */
+int64_t mr_zip_extract_to_file(const char *zip_path, const char *entry_name, const char *out_path) {
+    if (!zip_path || !entry_name || !out_path) return -1;
+    size_t zlen = 0;
+    uint8_t *data = slurp(zip_path, &zlen);
+    if (!data) return -1;
+    const uint8_t *eocd = find_eocd(data, zlen);
+    if (!eocd) { free(data); return -1; }
+    uint16_t nent = rd16(eocd + 10);
+    uint32_t cd_off = rd32(eocd + 16);
+    size_t want = strlen(entry_name);
+    size_t off = cd_off;
+    int64_t result = -1;
+    for (uint16_t i = 0; i < nent; i++) {
+        ZipEntry e;
+        if (cd_entry_at(data, zlen, off, &e) != 0) break;
+        size_t next = off + 46 + e.name_len + e.extra_len + e.comment_len;
+        if (e.name_len == want && memcmp(e.name, entry_name, want) == 0) {
+            uint8_t *raw = NULL;
+            size_t raw_len = 0;
+            if (extract_entry(data, zlen, &e, &raw, &raw_len) == 0) {
+                FILE *f = fopen(out_path, "wb");
+                if (f) {
+                    if (fwrite(raw, 1, raw_len, f) == raw_len) result = (int64_t)raw_len;
+                    fclose(f);
+                }
+                free(raw);
+            }
+            break;
+        }
+        off = next;
+    }
+    free(data);
+    return result;
+}
+
 /* List entry names with given prefix into out as "a\nb\n". Returns count, or -1. */
 int64_t mr_zip_list(const char *zip_path, const char *prefix, char *out, int64_t out_cap) {
     if (!zip_path || !prefix || !out || out_cap < 1) return -1;

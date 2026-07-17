@@ -1,0 +1,93 @@
+// ocr.src — optional Tesseract OCR (dlopen soft dependency) + document mode policy.
+//
+// Decision (text-only / mixed / images-only):
+//   text-only  → text layer only; never OCR
+//   mixed      → text layer primary; OCR images when enabled + alt empty (or always)
+//   images-only→ OCR required when enabled; else clear error asking to enable OCR
+//
+// See docs/ocr-policy.md.
+
+extern "mrocr" {
+    cflags "native/mr_ocr.c"
+    link "dl"
+    fn mr_ocr_available() int
+    fn mr_ocr_file(string, string, ptr, int) int
+}
+
+func cfg_ocr_enabled() (b) { b = cfg_bool(".ocr.enabled", 0) }
+func cfg_ocr_lang() (s) {
+    s = cfg_str(".ocr.lang", "eng")
+    if s == "" { s = "eng" }
+}
+func cfg_ocr_min_text() (n) {
+    n = cfg_int(".ocr.min_text_chars", 40)
+    if n <= 0 { n = 40 }
+}
+// when_empty_alt | always | never
+func cfg_ocr_images_mode() (s) {
+    s = cfg_str(".ocr.images", "when_empty_alt")
+    if s == "" { s = "when_empty_alt" }
+}
+
+func ocr_available() (ok) { ok = mr_ocr_available() }
+
+func ocr_file(path) (ok, text) {
+    ok = 0
+    text = ""
+    if ocr_available() == 0 { return }
+    cap := 1048576
+    buf := alloc(cap)
+    if buf == 0 { return }
+    n := mr_ocr_file(path, cfg_ocr_lang(), buf, cap)
+    if n < 0 { free(buf); return }
+    text = trim(ptr_str(buf))
+    free(buf)
+    ok = 1
+}
+
+func tmp_ocr_path(suffix) (p) {
+    p = "/tmp/machin-rag-ocr-" + str(point_id(suffix + str(now_ms()))) + suffix
+}
+
+// Classify by extracted text length + whether media/pages need OCR.
+// Returns: "text-only" | "mixed" | "images-only"
+func doc_mode(text_chars, has_images) (mode) {
+    mode = "text-only"
+    minc := cfg_ocr_min_text()
+    // No images/empty-pages → always text-only (short notes are fine).
+    if has_images == 0 {
+        mode = "text-only"
+        return
+    }
+    if text_chars < minc { mode = "images-only" } else { mode = "mixed" }
+}
+
+// Count body chars ignoring [image:…] stub lines (for mode detection).
+func text_chars_no_stubs(body) (n) {
+    n = 0
+    lines := split(body, "\n")
+    for _, line := range lines {
+        t := trim(line)
+        if t == "" { continue }
+        if has_prefix(t, "[image:") { continue }
+        if has_prefix(t, "## ") { continue }
+        n = n + len(t)
+    }
+}
+
+func should_ocr_image(alt) (yes) {
+    yes = 0
+    if cfg_ocr_enabled() == 0 { return }
+    m := cfg_ocr_images_mode()
+    if m == "never" { return }
+    if m == "always" { yes = 1; return }
+    // when_empty_alt
+    if trim(alt) == "" { yes = 1 }
+}
+
+func ocr_status_json() (j) {
+    en := 0
+    if cfg_ocr_enabled() == 1 { en = 1 }
+    av := ocr_available()
+    j = "{\"enabled\":" + str(en) + ",\"available\":" + str(av) + ",\"lang\":\"" + jesc(cfg_ocr_lang()) + "\",\"images\":\"" + jesc(cfg_ocr_images_mode()) + "\",\"min_text_chars\":" + str(cfg_ocr_min_text()) + "}"
+}

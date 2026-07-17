@@ -27,7 +27,7 @@ mkdir -p ~/.machin-rag && cp config.example.json ~/.machin-rag/config.json   # o
 
 Config: `~/.machin-rag/config.json` → env → CLI. Env: `QDRANT_URL` (default `http://127.0.0.1:6333`), `PORT` (serve, default `7091`).
 
-## Formats (v0.5)
+## Formats (v0.6)
 
 | Format | Detection | Chunking |
 |--------|-----------|----------|
@@ -36,12 +36,14 @@ Config: `~/.machin-rag/config.json` → env → CLI. Env: `QDRANT_URL` (default 
 | `csv` | `.csv` | one chunk per row (header → fields) |
 | `json` | `.json` | array of objects or single object |
 | `ndjson` | `.ndjson` / `.jsonl` | one object per line |
-| `docx` | `.docx` | OOXML: headings/tables/images/links + headers/notes |
-| `pdf` | `.pdf` | text-layer pages via poppler-cpp (no OCR) |
+| `docx` | `.docx` | OOXML walk + optional OCR on images |
+| `pdf` | `.pdf` | text-layer pages; OCR empty pages if enabled |
 
 Force with `-F` / `--format` or API `"format"`.
 
-**Build/runtime:** zlib + OpenSSL libcrypto; PDF needs system `libpoppler-cpp` (`libpoppler-cpp0v5` on Ubuntu). Headers vendored under `vendor/poppler/cpp/`.
+**Document modes** (docx/pdf): `text-only` · `mixed` · `images-only` — see [docs/ocr-policy.md](docs/ocr-policy.md).
+
+**Deps:** zlib + OpenSSL; PDF → `libpoppler-cpp0v5`; OCR (optional) → `libtesseract4` + `tesseract-ocr-eng`.
 
 ## Agent contract
 

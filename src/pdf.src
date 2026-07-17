@@ -1,13 +1,14 @@
-// pdf.src — PDF text-layer ingest via poppler-cpp (no OCR).
+// pdf.src — PDF text-layer ingest via poppler-cpp (+ optional OCR for empty pages).
 
 extern "mrpdf" {
-    // system often has libpoppler-cpp.so.0 without the unversioned .so symlink
     cflags "-Ivendor/poppler/cpp -L/usr/lib/x86_64-linux-gnu native/mr_pdf.cpp"
     link ":libpoppler-cpp.so.0"
     link "stdc++"
     fn mr_pdf_page_count(string) int
     fn mr_pdf_title(string, ptr, int) int
     fn mr_pdf_page_text(string, int, ptr, int) int
+    fn mr_pdf_page_png(string, int, string, float) int
+    fn mr_pdf_can_render() int
 }
 
 func pdf_title(path) (title) {
@@ -22,7 +23,6 @@ func pdf_title(path) (title) {
 func pdf_page_text(path, page0) (ok, text) {
     ok = 0
     text = ""
-    // 4 MiB per page cap
     cap := 4194304
     buf := alloc(cap)
     if buf == 0 { return }
@@ -33,27 +33,80 @@ func pdf_page_text(path, page0) (ok, text) {
     ok = 1
 }
 
-func parse_pdf_file(path) (chunks) {
+func pdf_ocr_page(path, page0) (ok, text) {
+    ok = 0
+    text = ""
+    if cfg_ocr_enabled() == 0 { return }
+    if ocr_available() == 0 { return }
+    if mr_pdf_can_render() == 0 { return }
+    png := tmp_ocr_path(".png")
+    if mr_pdf_page_png(path, page0, png, 150.0) < 0 { return }
+    ok, text = ocr_file(png)
+    nclean := write_file(png, "")
+    if nclean < 0 { nclean = 0 }
+}
+
+func parse_pdf_file(path) (chunks, mode, errdetail) {
     chunks = []Chunk{}
+    mode = ""
+    errdetail = ""
     n := mr_pdf_page_count(path)
-    if n < 0 { return }
+    if n < 0 {
+        errdetail = "pdf open failed (install libpoppler-cpp0v5 / missing or locked file): " + path
+        return
+    }
     title := pdf_title(path)
     maxc := cfg_md_max()
     if maxc <= 0 { maxc = 2000 }
+    text_chars := 0
+    empty_pages := 0
     p := 0
+    page_texts := []string{}
     while p < n {
         ok, page_text := pdf_page_text(path, p)
-        p = p + 1
-        if ok == 0 { continue }
+        if ok == 0 { page_text = "" }
         page_text = trim(page_text)
+        if page_text == "" { empty_pages = empty_pages + 1 }
+        text_chars = text_chars + len(page_text)
+        page_texts = append(page_texts, page_text)
+        p = p + 1
+    }
+    has_img := 0
+    if empty_pages > 0 { has_img = 1 }
+    mode = doc_mode(text_chars, has_img)
+    if mode == "images-only" {
+        if cfg_ocr_enabled() == 0 {
+            errdetail = "pdf is images-only (no text layer); enable ocr.enabled in ~/.machin-rag/config.json (needs libtesseract4 + eng tessdata)"
+            return
+        }
+        if ocr_available() == 0 {
+            errdetail = "pdf is images-only but OCR unavailable (apt install libtesseract4 tesseract-ocr-eng)"
+            return
+        }
+    }
+    p = 0
+    while p < n {
+        page_text := page_texts[p]
+        ocr_used := 0
+        if page_text == "" {
+            if cfg_ocr_enabled() == 1 {
+                o2, ot := pdf_ocr_page(path, p)
+                if o2 == 1 {
+                    if trim(ot) != "" {
+                        page_text = trim(ot)
+                        ocr_used = 1
+                    }
+                }
+            }
+        }
+        p = p + 1
         if page_text == "" { continue }
-        base_meta := "\"source\":\"" + jesc(path) + "\",\"format\":\"pdf\",\"title\":\"" + jesc(title) + "\",\"page\":" + str(p)
+        base_meta := "\"source\":\"" + jesc(path) + "\",\"format\":\"pdf\",\"title\":\"" + jesc(title) + "\",\"page\":" + str(p) + ",\"mode\":\"" + jesc(mode) + "\",\"ocr\":" + str(ocr_used)
         if len(page_text) <= maxc {
             meta := "{" + base_meta + "}"
             chunks = append(chunks, chunk_make(page_text, meta))
             continue
         }
-        // hard-split long pages
         paras := split(page_text, "\n")
         buf := ""
         part := 0
@@ -79,10 +132,15 @@ func parse_pdf_file(path) (chunks) {
 }
 
 func ingest_pdf(coll, path) (ok, detail) {
-    chunks := parse_pdf_file(path)
+    chunks, mode, errdetail := parse_pdf_file(path)
+    if errdetail != "" {
+        ok = 0
+        detail = errdetail
+        return
+    }
     if len(chunks) == 0 {
         ok = 0
-        detail = "pdf parse failed (missing/locked/no text layer): " + path
+        detail = "pdf produced no chunks (mode=" + mode + "): " + path
         return
     }
     kept := []Chunk{}

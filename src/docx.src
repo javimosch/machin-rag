@@ -182,10 +182,32 @@ func images_paths_json(images_js) (js) {
     js = js + "]"
 }
 
-func parse_docx_file(path) (chunks) {
+func docx_ocr_media(docx_path, media_path) (ok, text) {
+    ok = 0
+    text = ""
+    ext := ".bin"
+    el := to_lower(media_path)
+    if has_suffix(el, ".png") { ext = ".png" }
+    if has_suffix(el, ".jpg") || has_suffix(el, ".jpeg") { ext = ".jpg" }
+    if has_suffix(el, ".tif") || has_suffix(el, ".tiff") { ext = ".tif" }
+    if has_suffix(el, ".webp") { ext = ".webp" }
+    if has_suffix(el, ".bmp") { ext = ".bmp" }
+    tmp := tmp_ocr_path(ext)
+    if mr_zip_extract_to_file(docx_path, media_path, tmp) < 0 { return }
+    ok, text = ocr_file(tmp)
+    nclean := write_file(tmp, "")
+    if nclean < 0 { nclean = 0 }
+}
+
+func parse_docx_file(path) (chunks, mode, errdetail) {
     chunks = []Chunk{}
+    mode = ""
+    errdetail = ""
     ok, xml := zip_read_string(path, "word/document.xml")
-    if ok == 0 { return }
+    if ok == 0 {
+        errdetail = "docx parse failed (not a zip / missing word/document.xml): " + path
+        return
+    }
     rels_js := "{}"
     link_js := "{}"
     rok, rels_xml := zip_read_string(path, "word/_rels/document.xml.rels")
@@ -195,7 +217,6 @@ func parse_docx_file(path) (chunks) {
     }
     title, creator := docx_core_props(path)
     body, images_js := docx_walk(path, xml, rels_js, link_js)
-    // phase 3: headers / footers / footnotes / endnotes
     if rok == 1 {
         aux := docx_collect_aux(path, rels_xml)
         if aux != "" {
@@ -204,11 +225,8 @@ func parse_docx_file(path) (chunks) {
         }
     }
     img_paths := images_paths_json(images_js)
-
-    // fallback: media not referenced via rels still listed
     mok, media_all := zip_list_prefix(path, "word/media/")
     if mok == 1 {
-        // append any media missing from images_js
         for _, mpath := range media_all {
             found := 0
             ii := 0
@@ -224,7 +242,6 @@ func parse_docx_file(path) (chunks) {
                 sz := mr_zip_entry_size(path, mpath)
                 if sz < 0 { sz = 0 }
                 ct := media_content_type(mpath)
-                // extend images_js
                 if images_js == "[]" {
                     images_js = "[{\"rid\":\"\",\"path\":\"" + jesc(mpath) + "\",\"name\":\"" + jesc(base) + "\",\"alt\":\"\",\"sha256\":\"" + jesc(sha) + "\",\"bytes\":" + str(sz) + ",\"content_type\":\"" + jesc(ct) + "\"}]"
                 } else {
@@ -237,14 +254,25 @@ func parse_docx_file(path) (chunks) {
         img_paths = images_paths_json(images_js)
     }
 
+    has_images := 0
+    if images_js != "[]" { has_images = 1 }
+    mode = doc_mode(text_chars_no_stubs(body), has_images)
+    if mode == "images-only" {
+        if cfg_ocr_enabled() == 0 {
+            errdetail = "docx is images-only (little/no text); enable ocr.enabled (needs libtesseract4 + eng tessdata)"
+            return
+        }
+        if ocr_available() == 0 {
+            errdetail = "docx is images-only but OCR unavailable (apt install libtesseract4 tesseract-ocr-eng)"
+            return
+        }
+    }
+
     maxc := cfg_md_max()
     if maxc <= 0 { maxc = 2000 }
-    base_meta := "\"source\":\"" + jesc(path) + "\",\"format\":\"docx\",\"title\":\"" + jesc(title) + "\",\"creator\":\"" + jesc(creator) + "\",\"images\":" + img_paths
+    base_meta := "\"source\":\"" + jesc(path) + "\",\"format\":\"docx\",\"title\":\"" + jesc(title) + "\",\"creator\":\"" + jesc(creator) + "\",\"mode\":\"" + jesc(mode) + "\",\"images\":" + img_paths
 
-    if body == "" {
-        meta := "{" + base_meta + "}"
-        chunks = append(chunks, chunk_make("(empty docx)", meta))
-    } else {
+    if trim(body) != "" {
         paras := split(body, "\n")
         buf := ""
         n := 0
@@ -296,7 +324,21 @@ func parse_docx_file(path) (chunks) {
             rd := cfg_unquote(rid)
             bz := parse_int(cfg_unquote(bytes_raw))
             stub := image_stub_line(nm, al, sh, bz, ctv)
-            meta := "{\"source\":\"" + jesc(path) + "\",\"format\":\"docx\",\"title\":\"" + jesc(title) + "\",\"creator\":\"" + jesc(creator) + "\",\"image\":\"" + jesc(pt) + "\",\"image_name\":\"" + jesc(nm) + "\",\"alt\":\"" + jesc(al) + "\",\"sha256\":\"" + jesc(sh) + "\",\"bytes\":" + str(bz) + ",\"content_type\":\"" + jesc(ctv) + "\",\"rid\":\"" + jesc(rd) + "\",\"i\":" + str(ii) + "}"
+            ocr_used := 0
+            ocr_text := ""
+            if should_ocr_image(al) == 1 {
+                if ocr_available() == 1 {
+                    o2, ot := docx_ocr_media(path, pt)
+                    if o2 == 1 {
+                        if trim(ot) != "" {
+                            ocr_text = trim(ot)
+                            ocr_used = 1
+                            stub = stub + "\n" + ocr_text
+                        }
+                    }
+                }
+            }
+            meta := "{\"source\":\"" + jesc(path) + "\",\"format\":\"docx\",\"title\":\"" + jesc(title) + "\",\"creator\":\"" + jesc(creator) + "\",\"mode\":\"" + jesc(mode) + "\",\"image\":\"" + jesc(pt) + "\",\"image_name\":\"" + jesc(nm) + "\",\"alt\":\"" + jesc(al) + "\",\"sha256\":\"" + jesc(sh) + "\",\"bytes\":" + str(bz) + ",\"content_type\":\"" + jesc(ctv) + "\",\"rid\":\"" + jesc(rd) + "\",\"ocr\":" + str(ocr_used) + ",\"i\":" + str(ii) + "}"
             chunks = append(chunks, chunk_make(stub, meta))
             ii = ii + 1
         }
@@ -304,10 +346,15 @@ func parse_docx_file(path) (chunks) {
 }
 
 func ingest_docx(coll, path) (ok, detail) {
-    chunks := parse_docx_file(path)
+    chunks, mode, errdetail := parse_docx_file(path)
+    if errdetail != "" {
+        ok = 0
+        detail = errdetail
+        return
+    }
     if len(chunks) == 0 {
         ok = 0
-        detail = "docx parse failed (not a zip / missing word/document.xml): " + path
+        detail = "docx produced no chunks (mode=" + mode + "): " + path
         return
     }
     kept := []Chunk{}

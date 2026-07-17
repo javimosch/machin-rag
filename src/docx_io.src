@@ -8,6 +8,7 @@ extern "mrzip" {
     fn mr_zip_entry_size(string, string) int
     fn mr_zip_list(string, string, ptr, int) int
     fn mr_zip_sha256_hex(string, string, ptr, int) int
+    fn mr_zip_extract_to_file(string, string, string) int
 }
 
 func xml_decode_entities(s) (out) {
