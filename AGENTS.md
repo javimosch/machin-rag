@@ -7,7 +7,7 @@ Agent-first local RAG (machin/MFL + Qdrant + hash embedder). Humans state intent
 - **JSON always** on CLI stdout; errors on stderr with semantic exit codes.
 - **No BYOK** — local hash embedder + local Qdrant.
 - **Single binary** — Vue UI embedded at compile time (`ui/index.html` → `src/ui_gen.src`).
-- **Do not** port csv-to-rag features (SSO, Pinecone, OpenAI, admin panels).
+- **Do not** grow SSO, cloud vector vendors, paid embedding APIs, or admin panels — keep the agent surface small.
 
 ## Layout
 

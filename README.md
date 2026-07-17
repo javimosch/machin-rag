@@ -6,7 +6,7 @@ Part of [**awesome-machin**](https://github.com/javimosch/awesome-machin). Docs:
 
 ## Why
 
-[csv-to-rag](https://github.com/javimosch/csv-to-rag) is a full human/admin RAG (SSO, UI, OpenAI/Pinecone). Agents need the opposite: **ingest → query → JSON**, free local embeddings, no panel tax. Pairs with [machin-colibri](https://github.com/javimosch/machin-colibri) / [bossless](https://github.com/javimosch/bossless) for retrieve→generate fully offline.
+Agents need **ingest → query → JSON** with free local embeddings and no panel tax. Pairs with [machin-colibri](https://github.com/javimosch/machin-colibri) / [bossless](https://github.com/javimosch/bossless) for retrieve→generate fully offline.
 
 ## Quick start
 
