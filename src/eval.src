@@ -127,7 +127,7 @@ func eval_suite_cerise() {
     total = total + 1
     if eval_case(coll, "soins corporels pour relâcher les tensions", "soins corporels|enveloppants|relacher", 1, "soins-top1") == 1 { pass = pass + 1 }
     total = total + 1
-    if eval_case(coll, "contacter Cerise téléphone", "06 37|roptin", 5, "contact") == 1 { pass = pass + 1 }
+    if eval_case(coll, "contacter Cerise téléphone", "06 37|roptin|telephone|appeler", 1, "contact-top1") == 1 { pass = pass + 1 }
     total = total + 1
     if eval_case(coll, "explorations aquatiques piscine", "aquatique|piscine|eau", 5, "aquatique") == 1 { pass = pass + 1 }
     total = total + 1

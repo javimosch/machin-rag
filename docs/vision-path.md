@@ -1,59 +1,61 @@
 # Vision path — images in the KB **without LLMs**
 
-Cerise’s tree is mostly photos. Today standalone `.jpg`/`.png` are skipped. Default plan: **no LLM / no VLM captioning**. Images become searchable via human text, OCR, or direct image vectors.
+## Do we even need image descriptions?
 
-## Default ladder (no LLMs)
+**It depends on the embedder.**
 
-### Phase 0 — Sidecar captions (human text)
+| Setup | Need prose captions? |
+|-------|----------------------|
+| **Text-only embedder** (hash / ONNX text) | Something textual must enter the index — but that can be a **sidecar**, **OCR**, or just **folder + filename**. Full “this photo shows…” prose is optional. |
+| **Multimodal embedder** (CLIP / SigLIP) | **No.** Pixels → vector; the query is embedded as text and matched in the same space. Descriptions become optional UX labels, not a retrieval requirement. |
 
-For `foo.jpg`, ingest `foo.jpg.md` / `foo.jpg.txt` / `captions.jsonl`.
+For Cerise-style landing RAG (FAQ + “montre la photo retraite”), **folder taxonomy + short human sidecars** usually beats auto-generated captions. Atmosphere photos rarely OCR well; CLIP is the escape hatch only if path/sidecar recall fails.
 
-- Chunk text only; payload keeps `image`, `sha256`.
-- Zero models. Best fit for a landing brief (“Retraite Haseya — cercle en montagne”).
+## How to “describe” images without LLMs
 
-### Phase 1 — Folder walk + local OCR (Tesseract soft-dep) — **shipped**
+1. **Human / agent sidecars** — `photo.jpg.md` written from the brief (best quality, zero models).
+2. **Path taxonomy** — `retraite/haseya.jpg` → `dossier: retraite · fichier: haseya` (shipped as `vision: path`).
+3. **OCR** — text *in* the image (flyers, slides); useless for most portraits/nature.
+4. **Design alt text** — export from Figma/Canva if it already exists.
+5. **CLIP** — skip language entirely; embed the bitmap.
+
+**Not required for a solid KB:** VLM/LLM captioning. Prefer structure (folders, names, sidecars) over generated prose.
+
+## Ladder (shipped → later)
+
+### Phase 0 — Sidecar captions — **shipped**
+
+`foo.jpg.md` / `.txt` → chunk with `payload.image`, `vision: sidecar`.
+
+### Phase 0b — Path taxonomy — **shipped**
+
+No sidecar? Index folder + filename (`vision: path`). Always works offline.
+
+### Phase 1 — OCR — **shipped**
+
+If `ocr.enabled` and Tesseract available, prefer OCR text over path-only when non-empty.
 
 ```bash
-./machin-rag ingest -c kb -f path/to/photos/     # walks images (depth≤2)
-./machin-rag ingest -c kb -f photo.jpg           # sidecar .md first, else OCR
+./machin-rag ingest -c kb -f path/to/photos/     # walk depth≤2
+./machin-rag ingest -c kb -f photo.jpg           # sidecar → OCR → path
 ```
 
-- Sidecar wins (Phase 0). Else `ocr.enabled` + Tesseract → `vision: ocr`.
-- Empty OCR still indexes `[image] path` so filename search works.
-- Refuse with a clear hint if no sidecar and OCR off/unavailable.
+### Phase 2 — CLIP / SigLIP — deferred
 
-### Phase 2 — Multimodal embeddings (CLIP / SigLIP) — still no caption LLM
+Image → vector, no caption LLM. Only if photo-*intent* queries still miss after sidecars + path.
 
-- Image → vector **directly** (no generated description).
-- Qdrant named vectors (`text` + `image`) or a sibling KB.
-- Query: embed the question with the **text** tower; search image vectors; RRF/merge with text hits.
-- Local ONNX weights only — not chat/VLM, not BYOK cloud vision.
-
-## Explicitly out of the default path
+## Out of default path
 
 | Approach | Why deferred |
 |----------|----------------|
 | Cloud vision APIs | BYOK creep |
-| Local VLM captioners (Moondream, LLaVA, …) | LLM-shaped deps; optional later only if Phase 0+1+CLIP still fail |
-| Storing image bytes in Qdrant payloads | Use paths + sha256 |
+| Local VLM captioners | LLM-shaped deps |
+| Bytes in Qdrant payloads | Keep paths + sha256 |
 | Face / biometric indexing | Non-goal |
 
-## Product shape
+## Cerise
 
-```bash
-# Phase 0
-./machin-rag ingest -c cerise-landing -f photos/captions.jsonl -F json
-
-# Phase 1 (future)
-./machin-rag ingest -c cerise-landing -f photos/retraite/haseya.jpg
-# → payload { text, image, sha256, vision: "ocr"|"sidecar" }
-```
-
-## Cerise order of work
-
-1. Keep `kb-cards.md` as FAQ backbone.
-2. **Done — Phase 0:** `testdata/cerise-landing/photos/*.jpg.md`
-3. **Done — Phase 1:** directory walk + OCR fallback (`ingest -f dir/`)
-4. CLIP only if photo-*intent* queries still miss (“montre la photo retraite”).
-
-Gate: `./machin-rag eval cerise` includes an `image-sidecar` case.
+- FAQ backbone: `testdata/cerise-landing/kb-cards.md`
+- CI stubs: `testdata/cerise-landing/photos/*.jpg.md`
+- Live tree: sidecars next to assets under `Documents/.../doc site internet Cerise/`
+- Gate: `./machin-rag eval cerise` (includes `image-sidecar` + `contact-top1`)

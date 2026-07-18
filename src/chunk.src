@@ -150,7 +150,37 @@ func ingest_image_caption_text(coll, text, image_path, source) (ok, detail) {
     ok, detail = upsert_chunks(coll, chunks)
 }
 
-// Phase 0 sidecar, else Phase 1 OCR when ocr.enabled (no LLM).
+// Path/folder/filename → searchable text without LLM or OCR.
+func image_path_caption(path) (text) {
+    base := path_basename(path)
+    parent := path_parent_name(path)
+    stem := base
+    ext := ext_of(base)
+    if ext != "" {
+        if len(base) > len(ext) + 1 {
+            stem = substr(base, 0, len(base) - len(ext) - 1)
+        }
+    }
+    text = "[image] " + path + "\n"
+    if parent != "" { text = text + "dossier: " + parent + "\n" }
+    text = text + "fichier: " + stem + "\n"
+    if parent != "" { text = text + parent + " — " + stem }
+    else { text = text + stem }
+}
+
+func path_parent_name(path) (name) {
+    name = ""
+    end := len(path) - 1
+    while end >= 0 {
+        if substr(path, end, end + 1) == "/" { break }
+        end = end - 1
+    }
+    if end <= 0 { return }
+    dir := substr(path, 0, end)
+    name = path_basename(dir)
+}
+
+// Phase 0 sidecar → Phase 1 OCR → Phase 0b path taxonomy (no LLM).
 func ingest_image_file(coll, path) (ok, detail) {
     side := find_image_sidecar(path)
     if side != "" {
@@ -158,33 +188,28 @@ func ingest_image_file(coll, path) (ok, detail) {
         ok, detail = ingest_image_caption_text(coll, raw, path, side)
         return
     }
-    // Phase 1 — local Tesseract
-    if cfg_ocr_enabled() == 0 {
-        ok = 0
-        detail = "image has no sidecar; enable ocr.enabled or add " + path + ".md — docs/vision-path.md"
-        return
+    // Phase 1 — local Tesseract when enabled
+    if cfg_ocr_enabled() == 1 {
+        if ocr_available() == 1 {
+            ook, otext := ocr_file(path)
+            if ook == 1 {
+                otext = trim(otext)
+                if otext != "" {
+                    body := "[image] " + path + "\n" + otext
+                    meta := "{\"source\":\"" + jesc(path) + "\",\"format\":\"image-ocr\",\"image\":\"" + jesc(path) + "\",\"vision\":\"ocr\"}"
+                    cs := []Chunk{}
+                    cs = append(cs, chunk_make(body, meta))
+                    ok, detail = upsert_chunks(coll, cs)
+                    return
+                }
+            }
+        }
     }
-    if ocr_available() == 0 {
-        ok = 0
-        detail = "image has no sidecar and OCR unavailable (apt install libtesseract4 tesseract-ocr-eng)"
-        return
-    }
-    ook, otext := ocr_file(path)
-    if ook == 0 {
-        ok = 0
-        detail = "OCR failed on " + path
-        return
-    }
-    otext = trim(otext)
-    if otext == "" {
-        // still index filename so photo remains findable by name
-        otext = "[image] " + path + "\n(no OCR text)"
-    } else {
-        otext = "[image] " + path + "\n" + otext
-    }
-    meta := "{\"source\":\"" + jesc(path) + "\",\"format\":\"image-ocr\",\"image\":\"" + jesc(path) + "\",\"vision\":\"ocr\"}"
+    // Phase 0b — folder + filename are enough for many landing assets
+    body := image_path_caption(path)
+    meta := "{\"source\":\"" + jesc(path) + "\",\"format\":\"image-path\",\"image\":\"" + jesc(path) + "\",\"vision\":\"path\"}"
     cs := []Chunk{}
-    cs = append(cs, chunk_make(otext, meta))
+    cs = append(cs, chunk_make(body, meta))
     ok, detail = upsert_chunks(coll, cs)
 }
 
@@ -196,15 +221,15 @@ func join_path(dir, name) (p) {
     }
 }
 
-// Phase 1 folder walk: ingest images (+ sidecars) under dir; skip nested dirs deeper than 1.
-func ingest_dir(coll, dir, depth) (ok, detail) {
+// Folder walk: ingest images under dir (depth≤2). Returns image count (not dir count).
+func ingest_dir(coll, dir, depth) (ok, detail, n) {
+    n = 0
     if depth > 2 {
         ok = 1
         detail = "{\"skipped_deep\":true}"
         return
     }
     entries := list_dir(dir)
-    n := 0
     errs := 0
     last := ""
     for _, name := range entries {
@@ -228,12 +253,12 @@ func ingest_dir(coll, dir, depth) (ok, detail) {
             continue
         }
         if path_looks_like_dir(full) == 1 {
-            sok, sdet := ingest_dir(coll, full, depth + 1)
+            sok, sdet, sn := ingest_dir(coll, full, depth + 1)
             if sok == 0 {
                 errs = errs + 1
                 last = sdet
             } else {
-                n = n + 1
+                n = n + sn
             }
         }
     }
@@ -330,7 +355,7 @@ func ingest_text(coll, text, source, fmt) (ok, detail) {
 
 func ingest_file(coll, path, fmt_override) (ok, detail) {
     if path_looks_like_dir(path) == 1 {
-        ok, detail = ingest_dir(coll, path, 0)
+        ok, detail, _ = ingest_dir(coll, path, 0)
         return
     }
     fmt := detect_format(path, fmt_override)

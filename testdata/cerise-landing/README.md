@@ -10,6 +10,10 @@ Source folder: `Documents/projects/doc site internet Cerise/`
 | `photos/*.jpg.md` | Phase-0 image sidecars (no LLM); stub `.jpg` for path tests |
 | `modele-site-internet.pdf` | Optional local Canva mockup (large; not required for `eval cerise`) |
 
+Live assets + sidecars also live under the source Cerise Documents tree
+(`…/doc site internet Cerise/**/*.jpg.md`). Ingest the folder with
+`ingest -f "$CERISE_DIR"` (sidecar → OCR → path taxonomy).
+
 ```bash
 ./machin-rag kb create -c cerise-landing
 ./machin-rag ingest -c cerise-landing -f testdata/cerise-landing/kb-cards.md

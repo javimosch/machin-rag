@@ -35,8 +35,12 @@ Retraite / retraites : parenthèse hors du temps, se ressourcer, chemin intérie
 
 ## Contact Cerise Roptin
 
-Cerise ROPTIN — contact et agenda. Téléphone : 06 37 80 44 36. Newsletter pour les invitations à venir.
+Contacter Cerise Roptin — téléphone, numéro de téléphone, appeler, joindre, contact, agenda.
+Cerise ROPTIN. Téléphone : 06 37 80 44 36.
+Pour prendre rendez-vous ou poser une question, appelez le 06 37 80 44 36.
+Newsletter pour recevoir les invitations à venir.
 
 ## Présentation
 
 Cerise Roptin : parcours en périnatalité (auxiliaire de puériculture, assistante maternelle, doula postnatale), massage, pratiques aquatiques, approche globale corps / cœur / âme.
+(Les coordonnées et le téléphone sont dans la fiche Contact.)

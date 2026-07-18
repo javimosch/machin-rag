@@ -80,9 +80,11 @@ HTTP: `GET /api/kb`, `POST /api/kb`, `POST /api/kb/info`, `POST /api/kb/delete` 
 ./machin-rag eval cerise         # Cerise FAQ + image-sidecar gate
 ./machin-rag eval hash           # lexical recall gate
 ./machin-rag eval synonyms       # soft ONNX signal (min 2/4)
-./machin-rag ingest -c kb -f photo.jpg   # sidecar .md, else OCR if enabled
-./machin-rag ingest -c kb -f photos/     # Phase-1 folder walk (depth≤2)
+./machin-rag ingest -c kb -f photo.jpg   # sidecar → OCR → path taxonomy
+./machin-rag ingest -c kb -f photos/     # folder walk (depth≤2)
 ```
+
+Images need **no LLM**: human sidecars, OCR of text-in-image, or folder/filename (`vision: path`). CLIP only if those fail — see `docs/vision-path.md`.
 
 Embedder: `hash-sha256-v2` (stopwords + light stem). **Re-ingest KBs after upgrade.**
 

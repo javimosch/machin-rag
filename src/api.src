@@ -1,6 +1,6 @@
 // api.src — HTTP handlers + agent-first JSON envelope helpers.
 
-func app_version() (v) { v = "0.6.5" }
+func app_version() (v) { v = "0.6.6" }
 
 type KbReq struct {
     name       string
