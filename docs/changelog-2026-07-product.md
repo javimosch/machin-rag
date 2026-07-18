@@ -1,61 +1,59 @@
-# Product Changelog - July 2026
+<div class="feature-card rounded-xl p-6">
+  <div class="flex items-start gap-4">
+    <div class="w-12 h-12 rounded-lg bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+      <span class="text-2xl">📚</span>
+    </div>
+    <div>
+      <h3 class="text-xl font-semibold text-white mb-2">Multi knowledge bases</h3>
+      <p class="text-white/40 leading-relaxed">One Qdrant collection = one KB. Agents create, list, inspect, and delete with <code>kb</code> commands; ingest/query take <code>-c NAME</code> so vectors never mix.</p>
+    </div>
+  </div>
+</div>
 
-        <div class="feature-card rounded-xl p-6">
-          <div class="flex items-start gap-4">
-            <div class="w-12 h-12 rounded-lg bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
-              <span class="text-2xl">🧠</span>
-            </div>
-            <div>
-              <h3 class="text-xl font-semibold text-white mb-2">Agent-first local RAG</h3>
-              <p class="text-white/40 leading-relaxed">Ship a single machin binary that ingest and query text against Qdrant — JSON on stdout, semantic exit codes, <code>help-json</code> discovery. Built for agents, not admin panels.</p>
-            </div>
-          </div>
-        </div>
+<div class="feature-card rounded-xl p-6">
+  <div class="flex items-start gap-4">
+    <div class="w-12 h-12 rounded-lg bg-sky-500/10 flex items-center justify-center flex-shrink-0">
+      <span class="text-2xl">🧪</span>
+    </div>
+    <div>
+      <h3 class="text-xl font-semibold text-white mb-2">Machin-native eval gates</h3>
+      <p class="text-white/40 leading-relaxed"><code>eval cerise</code>, <code>eval hash</code>, and <code>eval synonyms</code> live in the binary — no Python. CI blocks on hash + Cerise; synonyms stay a soft ONNX signal.</p>
+    </div>
+  </div>
+</div>
 
-        <div class="feature-card rounded-xl p-6">
-          <div class="flex items-start gap-4">
-            <div class="w-12 h-12 rounded-lg bg-sky-500/10 flex items-center justify-center flex-shrink-0">
-              <span class="text-2xl">💸</span>
-            </div>
-            <div>
-              <h3 class="text-xl font-semibold text-white mb-2">Zero BYOK embeddings</h3>
-              <p class="text-white/40 leading-relaxed">A tiny local hash embedder (<code>hash-sha256-v1</code>, 64-d cosine) means no OpenAI keys and no model downloads. Keyword-ish quality, honest for MVP agent memory and docs.</p>
-            </div>
-          </div>
-        </div>
+<div class="feature-card rounded-xl p-6">
+  <div class="flex items-start gap-4">
+    <div class="w-12 h-12 rounded-lg bg-violet-500/10 flex items-center justify-center flex-shrink-0">
+      <span class="text-2xl">🍒</span>
+    </div>
+    <div>
+      <h3 class="text-xl font-semibold text-white mb-2">Cerise landing backtest</h3>
+      <p class="text-white/40 leading-relaxed">Real French FAQ corpus with curated service cards. Ranking covers doula, retraites, aquatique, contact, and photo sidecars.</p>
+    </div>
+  </div>
+</div>
 
-        <div class="feature-card rounded-xl p-6">
-          <div class="flex items-start gap-4">
-            <div class="w-12 h-12 rounded-lg bg-violet-500/10 flex items-center justify-center flex-shrink-0">
-              <span class="text-2xl">📦</span>
-            </div>
-            <div>
-              <h3 class="text-xl font-semibold text-white mb-2">Qdrant + Vue peek UI</h3>
-              <p class="text-white/40 leading-relaxed">Compose brings local Qdrant; <code>serve</code> exposes <code>/api/*</code> plus an embedded Vue 3 CDN UI for humans who want a quick ingest/search console.</p>
-            </div>
-          </div>
-        </div>
+<div class="feature-card rounded-xl p-6">
+  <div class="flex items-start gap-4">
+    <div class="w-12 h-12 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+      <span class="text-2xl">🖼</span>
+    </div>
+    <div>
+      <h3 class="text-xl font-semibold text-white mb-2">Vision without LLMs</h3>
+      <p class="text-white/40 leading-relaxed">Phase 0 sidecars (<code>photo.jpg.md</code>) and Phase 1 folder walk + optional Tesseract OCR. No cloud vision, no VLM captioning.</p>
+    </div>
+  </div>
+</div>
 
-        <div class="feature-card rounded-xl p-6">
-          <div class="flex items-start gap-4">
-            <div class="w-12 h-12 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0">
-              <span class="text-2xl">📄</span>
-            </div>
-            <div>
-              <h3 class="text-xl font-semibold text-white mb-2">Structured ingest (v0.2)</h3>
-              <p class="text-white/40 leading-relaxed">Parse <code>md</code>, <code>csv</code>, <code>json</code>, and <code>ndjson</code> into chunks with a declarative normalize template. Config merges <code>~/.machin-rag/config.json</code> → env → CLI.</p>
-            </div>
-          </div>
-        </div>
-
-        <div class="feature-card rounded-xl p-6">
-          <div class="flex items-start gap-4">
-            <div class="w-12 h-12 rounded-lg bg-rose-500/10 flex items-center justify-center flex-shrink-0">
-              <span class="text-2xl">📎</span>
-            </div>
-            <div>
-              <h3 class="text-xl font-semibold text-white mb-2">DOCX + PDF + OCR policy (v0.5→v0.6)</h3>
-              <p class="text-white/40 leading-relaxed">Clear modes for text-only / mixed / images-only. Optional Tesseract OCR (soft <code>dlopen</code>) for image-only docs; CI smoke + hash recall eval scripts.</p>
-            </div>
-          </div>
-        </div>
+<div class="feature-card rounded-xl p-6">
+  <div class="flex items-start gap-4">
+    <div class="w-12 h-12 rounded-lg bg-rose-500/10 flex items-center justify-center flex-shrink-0">
+      <span class="text-2xl">🔤</span>
+    </div>
+    <div>
+      <h3 class="text-xl font-semibold text-white mb-2">hash-sha256-v2 embedder</h3>
+      <p class="text-white/40 leading-relaxed">Stopword drop + light plural stem for better French FAQ ranking. Re-ingest after upgrade. ONNX stays paused while the synonym gate holds.</p>
+    </div>
+  </div>
+</div>
