@@ -22,7 +22,8 @@
 
       <header>
         <div class="flex flex-wrap items-center gap-3">
-          <span class="text-xs font-medium text-emerald-300/80 pill rounded-full px-3 py-1">v0.6 · MIT · open source</span>
+          <span class="text-xs font-medium text-emerald-300/80 pill rounded-full px-3 py-1">v0.6.5 · MIT · open source</span>
+          <span class="text-xs font-medium text-white/40 pill rounded-full px-3 py-1">multi-KB</span>
           <span class="text-xs font-medium text-white/40 pill rounded-full px-3 py-1">built in machin (MFL)</span>
           <span class="text-xs font-medium text-white/40 pill rounded-full px-3 py-1">no BYOK</span>
         </div>
@@ -43,10 +44,10 @@
         <p class="text-white/40 text-sm uppercase tracking-widest mb-3">30-second loop</p>
         <div class="term rounded-xl p-5 overflow-x-auto">
 <pre class="text-sm leading-relaxed"><span class="text-white/40">docker compose up -d && ./build.sh</span>
+<span class="text-emerald-300">./machin-rag</span> <span class="text-amber-200">kb create</span> <span class="text-sky-300">-c</span> <span class="text-white/80">docs</span>
 <span class="text-emerald-300">./machin-rag</span> <span class="text-amber-200">ingest</span> <span class="text-sky-300">-c docs -f</span> <span class="text-white/80">notes.md</span>
-<span class="text-emerald-300">./machin-rag</span> <span class="text-amber-200">ingest</span> <span class="text-sky-300">-c docs -f</span> <span class="text-white/80">rows.csv</span>
 <span class="text-emerald-300">./machin-rag</span> <span class="text-amber-200">query</span>  <span class="text-sky-300">-c docs -q</span> <span class="text-white/80">"native binary"</span> <span class="text-sky-300">-k 3</span>
-<span class="text-white/40"># → md/csv/json · config ~/.machin-rag/config.json → env → CLI</span></pre>
+<span class="text-white/40"># multi-KB = one Qdrant collection per -c name · config ~/.machin-rag/config.json</span></pre>
         </div>
       </section>
 

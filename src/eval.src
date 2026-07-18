@@ -1,0 +1,218 @@
+// eval.src — machin-native acceptance suites (no Python).
+// Suites: cerise | hash | synonyms | all
+// Exit 0 pass, 1 gate fail, 82/106 infra.
+
+func eval_norm(s) (o) {
+    o = to_lower(s)
+    o = replace(o, "’", "'")
+    o = replace(o, "‘", "'")
+    o = replace(o, " ", " ")
+    o = replace(o, "é", "e")
+    o = replace(o, "è", "e")
+    o = replace(o, "ê", "e")
+    o = replace(o, "à", "a")
+    o = replace(o, "ù", "u")
+    o = replace(o, "ô", "o")
+    o = replace(o, "î", "i")
+    o = replace(o, "ç", "c")
+}
+
+func eval_needle_hit(blob, needles_csv) (ok) {
+    ok = 0
+    b := eval_norm(blob)
+    parts := split(needles_csv, "|")
+    for _, n := range parts {
+        n = trim(n)
+        if n == "" { continue }
+        if index(b, eval_norm(n)) >= 0 {
+            ok = 1
+            return
+        }
+    }
+}
+
+func eval_top_texts(qjson, top_n) (blob) {
+    blob = ""
+    i := 0
+    while i < top_n {
+        raw, err := json_get(qjson, ".result[" + str(i) + "].payload.text")
+        if err != "" { break }
+        blob = blob + " " + cfg_unquote(raw)
+        i = i + 1
+    }
+}
+
+func eval_case(coll, q, needles_csv, top_n, label) (ok) {
+    qok, detail := search_points(coll, q, 5)
+    if qok == 0 {
+        eprint("  [FAIL] " + label + " search: " + detail)
+        ok = 0
+        return
+    }
+    blob := eval_top_texts(detail, top_n)
+    ok = eval_needle_hit(blob, needles_csv)
+    mark := "FAIL"
+    if ok == 1 { mark = "PASS" }
+    eprint("  [" + mark + "] top" + str(top_n) + " " + label)
+}
+
+func eval_ingest_list(coll, files) (ok, detail, n) {
+    n = 0
+    for _, f := range files {
+        raw := read_file(f)
+        if raw == "" { continue }
+        iok, idet := ingest_file(coll, f, "")
+        if iok == 0 {
+            ok = 0
+            detail = f + ": " + idet
+            return
+        }
+        n = n + 1
+    }
+    if n == 0 {
+        ok = 0
+        detail = "no fixtures ingested (run from repo root)"
+        return
+    }
+    ok = 1
+    detail = "{\"ingested\":" + str(n) + "}"
+}
+
+func eval_report(suite, pass, total, min_pass) {
+    okflag := "false"
+    if pass >= min_pass { okflag = "true" }
+    report := "{\"suite\":\"" + suite + "\",\"embed\":\"" + embed_provider() + "\",\"pass\":" + str(pass) + ",\"total\":" + str(total) + ",\"min_pass\":" + str(min_pass) + ",\"ok\":" + okflag + "}"
+    if pass >= min_pass {
+        println("{\"ok\":true,\"version\":\"" + app_version() + "\",\"data\":" + report + "}")
+        exit(0)
+    }
+    eprint("{\"ok\":false,\"version\":\"" + app_version() + "\",\"data\":" + report + "}")
+    exit(1)
+}
+
+func eval_fresh_kb(coll) {
+    nok, _ := qdrant_ready()
+    if nok == 0 { out_err(106, "qdrant", "qdrant down — docker compose up -d") }
+    _, _ = delete_kb(coll)
+    cok, cdet := create_kb(coll)
+    if cok == 0 { out_err(106, "qdrant", cdet) }
+}
+
+// ---- cerise ----
+
+func eval_suite_cerise() {
+    coll := "cerise_eval"
+    eval_fresh_kb(coll)
+    // PDF mockup is optional/local (large); gate stays green without it.
+    files := []string{
+        "testdata/cerise-landing/kb-cards.md",
+        "testdata/cerise-landing/texte-site-internet.clean.md",
+        "testdata/cerise-landing/texte site internet.docx",
+        "testdata/cerise-landing/modele-site-internet.pdf",
+        "testdata/cerise-landing/photos/retraite-haseya.jpg.md",
+        "testdata/cerise-landing/photos/photo-doula.jpg.md",
+        "testdata/cerise-landing/photos/rituel.jpg.md",
+    }
+    iok, idet, _ := eval_ingest_list(coll, files)
+    if iok == 0 { out_err(82, "validation", idet) }
+
+    pass := 0
+    total := 0
+    total = total + 1
+    if eval_case(coll, "Qu'est-ce qu'une doula ?", "doula|soutien pratique|suivis medicaux", 5, "doula") == 1 { pass = pass + 1 }
+    total = total + 1
+    if eval_case(coll, "parenthèse hors du temps pour me reconnecter", "retraite", 1, "retraites-top1") == 1 { pass = pass + 1 }
+    total = total + 1
+    if eval_case(coll, "citation danser sous la pluie", "senèque|seneque|orage", 5, "citation") == 1 { pass = pass + 1 }
+    total = total + 1
+    if eval_case(coll, "soins corporels pour relâcher les tensions", "soins corporels|enveloppants|relacher", 1, "soins-top1") == 1 { pass = pass + 1 }
+    total = total + 1
+    if eval_case(coll, "contacter Cerise téléphone", "06 37|roptin", 5, "contact") == 1 { pass = pass + 1 }
+    total = total + 1
+    if eval_case(coll, "explorations aquatiques piscine", "aquatique|piscine|eau", 5, "aquatique") == 1 { pass = pass + 1 }
+    total = total + 1
+    if eval_case(coll, "soins énergétiques libérer les mémoires", "energetique|memoires|transmuter", 5, "energetique") == 1 { pass = pass + 1 }
+    total = total + 1
+    if eval_case(coll, "photo retraite haseya montagne", "haseya|retraite|montagne", 5, "image-sidecar") == 1 { pass = pass + 1 }
+
+    decoy := "cerise_eval_noise"
+    eval_fresh_kb(decoy)
+    _, _ = ingest_text(decoy, "Satellite orbital mechanics and firmware checksums for rockets.", "(inline)", "txt")
+    total = total + 1
+    dok, ddet := search_points(decoy, "Qu'est-ce qu'une doula ?", 3)
+    iso := 0
+    if dok == 1 {
+        blob := eval_norm(eval_top_texts(ddet, 3))
+        if index(blob, "doula") < 0 {
+            if index(blob, "rocket") >= 0 || index(blob, "satellite") >= 0 || index(blob, "firmware") >= 0 { iso = 1 }
+        }
+    }
+    if iso == 1 { pass = pass + 1; eprint("  [PASS] isolation") } else { eprint("  [FAIL] isolation") }
+    eval_report("cerise", pass, total, total)
+}
+
+// ---- hash lexical ----
+
+func eval_suite_hash() {
+    coll := "eval_hash"
+    eval_fresh_kb(coll)
+    files := []string{
+        "testdata/eval/notes.md",
+        "testdata/eval/rows.csv",
+        "testdata/eval/items.json",
+        "testdata/eval/synonyms.md",
+        "testdata/eval/sample.pdf",
+    }
+    iok, idet, _ := eval_ingest_list(coll, files)
+    if iok == 0 { out_err(82, "validation", idet) }
+    // sample.docx optional
+    if read_file("testdata/eval/sample.docx") != "" {
+        _, _ = ingest_file(coll, "testdata/eval/sample.docx", "")
+    }
+
+    pass := 0
+    total := 4
+    if eval_case(coll, "native binary", "native binary|compiles mfl|machin compiles", 3, "native-binary") == 1 { pass = pass + 1 }
+    if eval_case(coll, "cosine similarity", "cosine|qdrant|vectors", 3, "cosine") == 1 { pass = pass + 1 }
+    if eval_case(coll, "embeddings", "embedding|embeddings|hash", 3, "embeddings") == 1 { pass = pass + 1 }
+    if eval_case(coll, "offline rag", "offline|rag|agent", 3, "offline-rag") == 1 { pass = pass + 1 }
+    eval_report("hash", pass, total, total)
+}
+
+// ---- synonym stress (ONNX signal; soft gate) ----
+
+func eval_suite_synonyms() {
+    coll := "eval_syn"
+    eval_fresh_kb(coll)
+    files := []string{
+        "testdata/eval-synonyms/architecture.md",
+        "testdata/eval-synonyms/performance.md",
+        "testdata/eval-synonyms/security.md",
+        "testdata/eval-synonyms/storage.md",
+    }
+    iok, idet, _ := eval_ingest_list(coll, files)
+    if iok == 0 { out_err(82, "validation", idet) }
+
+    pass := 0
+    total := 4
+    if eval_case(coll, "system design overview", "architecture|blueprint|topology", 3, "design") == 1 { pass = pass + 1 }
+    if eval_case(coll, "how fast is it", "latency|throughput|speed", 3, "perf") == 1 { pass = pass + 1 }
+    if eval_case(coll, "login and permissions", "authentication|bearer|401", 3, "auth") == 1 { pass = pass + 1 }
+    if eval_case(coll, "local vector store", "vector database|cosine|offline", 3, "vectors") == 1 { pass = pass + 1 }
+    // soft: 2/4 — below this is an ONNX unpause signal
+    if pass < 2 {
+        eprint("Hash struggling on synonyms — candidate signal to prototype ONNX (docs/embedder-roadmap.md)")
+    } else {
+        eprint("Hash still OK on synonym suite — ONNX stays paused")
+    }
+    eval_report("synonyms", pass, total, 2)
+}
+
+func cmd_eval(pos) {
+    suite := "cerise"
+    if len(pos) > 1 { suite = pos[1] }
+    if suite == "cerise" { eval_suite_cerise(); return }
+    if suite == "hash" { eval_suite_hash(); return }
+    if suite == "synonyms" { eval_suite_synonyms(); return }
+    out_err(85, "invalid_arg", "eval suites: cerise|hash|synonyms")
+}

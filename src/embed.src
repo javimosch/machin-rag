@@ -4,7 +4,45 @@
 
 func embed_dim() (d) { d = 64 }
 
-func embed_provider() (p) { p = "hash-sha256-v1" }
+// v2: FR/EN stopwords dropped + light plural stem + punct strip
+func embed_provider() (p) { p = "hash-sha256-v2" }
+
+func embed_stopwords() (s) {
+    // pipe-wrapped for substring membership checks
+    s = "|a|au|aux|avec|ce|ces|cet|cette|dans|de|des|du|elle|en|et|est|il|je|la|le|les|me|mes|moi|mon|ne|nos|notre|nous|on|ou|par|pas|pour|qu|que|qui|sa|se|ses|si|son|sur|ta|te|tes|tu|un|une|vos|votre|vous|the|and|or|of|to|in|on|for|is|are|was|be|this|that|with|as|at|by|from|an|it|its|"
+}
+
+func embed_is_stop(t) (y) {
+    y = 0
+    if len(t) <= 2 { y = 1; return }
+    key := "|" + t + "|"
+    if index(embed_stopwords(), key) >= 0 { y = 1 }
+}
+
+func embed_clean_token(t) (o) {
+    o = to_lower(trim(t))
+    o = replace(o, ",", "")
+    o = replace(o, ".", "")
+    o = replace(o, ";", "")
+    o = replace(o, ":", "")
+    o = replace(o, "!", "")
+    o = replace(o, "?", "")
+    o = replace(o, "«", "")
+    o = replace(o, "»", "")
+    o = replace(o, "\"", "")
+    o = replace(o, "'", "")
+    o = replace(o, "(", "")
+    o = replace(o, ")", "")
+    o = replace(o, "—", "")
+    o = replace(o, "–", "")
+    o = replace(o, "/", " ")
+    // light French/English plural: drop trailing s on longer tokens
+    if len(o) > 4 {
+        if has_suffix(o, "s") {
+            o = substr(o, 0, len(o) - 1)
+        }
+    }
+}
 
 // Accumulate a DIM-float bag-of-tokens vector, L2-normalized, as a JSON array.
 func embed_json(text) (j) {
@@ -20,15 +58,23 @@ func embed_json(text) (j) {
     norm = replace(norm, "\n", " ")
     norm = replace(norm, "\t", " ")
     toks := split(norm, " ")
-    for _, t := range toks {
-        t = trim(t)
+    for _, raw := range toks {
+        t := embed_clean_token(raw)
         if len(t) == 0 { continue }
-        hb := from_hex(sha256(t))
-        idx := byte_at(hb, 0) % dim
-        if idx < 0 { idx = 0 - idx }
-        sign := 1.0
-        if (byte_at(hb, 1) % 2) == 1 { sign = 0.0 - 1.0 }
-        v[idx] = v[idx] + sign
+        if embed_is_stop(t) == 1 { continue }
+        // also split leftover multi-tokens from "/" replace
+        parts := split(t, " ")
+        for _, p := range parts {
+            p = trim(p)
+            if len(p) == 0 { continue }
+            if embed_is_stop(p) == 1 { continue }
+            hb := from_hex(sha256(p))
+            idx := byte_at(hb, 0) % dim
+            if idx < 0 { idx = 0 - idx }
+            sign := 1.0
+            if (byte_at(hb, 1) % 2) == 1 { sign = 0.0 - 1.0 }
+            v[idx] = v[idx] + sign
+        }
     }
 
     // L2 normalize

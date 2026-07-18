@@ -25,7 +25,7 @@ fi
 "$MACHIN" encode \
   src/machweb.src src/flags.src src/embed.src src/config.src src/ocr.src \
   src/parsers.src src/chunk.src src/docx_io.src src/docx.src src/pdf.src \
-  src/qdrant.src src/api.src src/main.src src/ui_gen.src \
+  src/qdrant.src src/api.src src/eval.src src/main.src src/ui_gen.src \
   > app.mfl
 "$MACHIN" build app.mfl -o machin-rag
 

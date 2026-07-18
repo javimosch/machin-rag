@@ -1,6 +1,11 @@
 // api.src — HTTP handlers + agent-first JSON envelope helpers.
 
-func app_version() (v) { v = "0.6.1" }
+func app_version() (v) { v = "0.6.5" }
+
+type KbReq struct {
+    name       string
+    collection string
+}
 
 func eprint(s) { n := write(2, s + "\n") }
 
@@ -46,6 +51,48 @@ func handle_status(req) (res) {
 
 func handle_collections(req) (res) {
     ok, detail := list_collections()
+    if ok == 0 { return api_err(502, detail) }
+    res = api_ok(detail)
+}
+
+// Knowledge bases = Qdrant collections (multi-KB is first-class).
+func kb_name_from(r) (n) {
+    n = r.name
+    if n == "" { n = r.collection }
+}
+
+func handle_kb_list(req) (res) {
+    ok, detail := list_collections()
+    if ok == 0 { return api_err(502, detail) }
+    res = api_ok("{\"model\":\"qdrant-collection-per-kb\",\"qdrant\":" + detail + "}")
+}
+
+func handle_kb_create(req) (res) {
+    if req.body == "" { return api_err(400, "body required") }
+    r := parse(req.body, KbReq{})
+    name := kb_name_from(r)
+    if name == "" { return api_err(400, "name or collection required") }
+    ok, detail := create_kb(name)
+    if ok == 0 { return api_err(502, detail) }
+    res = api_ok("{\"kb\":\"" + jesc(name) + "\",\"created\":true,\"qdrant\":" + detail + "}")
+}
+
+func handle_kb_delete(req) (res) {
+    if req.body == "" { return api_err(400, "body required") }
+    r := parse(req.body, KbReq{})
+    name := kb_name_from(r)
+    if name == "" { return api_err(400, "name or collection required") }
+    ok, detail := delete_kb(name)
+    if ok == 0 { return api_err(502, detail) }
+    res = api_ok(detail)
+}
+
+func handle_kb_info(req) (res) {
+    if req.body == "" { return api_err(400, "body required") }
+    r := parse(req.body, KbReq{})
+    name := kb_name_from(r)
+    if name == "" { return api_err(400, "name or collection required") }
+    ok, detail := kb_info(name)
     if ok == 0 { return api_err(502, detail) }
     res = api_ok(detail)
 }

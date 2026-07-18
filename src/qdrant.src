@@ -46,6 +46,9 @@ func jesc(s) (r) {
     r = replace(r, "\n", "\\n")
     r = replace(r, "\r", "")
     r = replace(r, "\t", " ")
+    // strip other C0 controls that break JSON parsers
+    r = replace(r, "\u0008", "")
+    r = replace(r, "\u000c", " ")
 }
 
 func ensure_collection(name) (ok, detail) {
@@ -84,6 +87,62 @@ func list_collections() (ok, detail) {
     detail = "status=" + str(st) + " body=" + resp
 }
 
+// create_kb — alias of ensure_collection (one Qdrant collection = one knowledge base).
+func create_kb(name) (ok, detail) {
+    if name == "" {
+        ok = 0
+        detail = "kb name required"
+        return
+    }
+    ok, detail = ensure_collection(name)
+}
+
+func delete_kb(name) (ok, detail) {
+    if name == "" {
+        ok = 0
+        detail = "kb name required"
+        return
+    }
+    st, resp, err := q_delete("/collections/" + name)
+    ok = 0
+    detail = err
+    if err != "" { return }
+    if st >= 200 {
+        if st < 300 {
+            ok = 1
+            detail = "{\"deleted\":\"" + jesc(name) + "\",\"qdrant\":" + resp + "}"
+            return
+        }
+    }
+    // 404 = already gone — treat as success for agents
+    if st == 404 {
+        ok = 1
+        detail = "{\"deleted\":\"" + jesc(name) + "\",\"already_absent\":true}"
+        return
+    }
+    detail = "status=" + str(st) + " body=" + resp
+}
+
+func kb_info(name) (ok, detail) {
+    if name == "" {
+        ok = 0
+        detail = "kb name required"
+        return
+    }
+    st, resp, err := q_get("/collections/" + name)
+    ok = 0
+    detail = err
+    if err != "" { return }
+    if st >= 200 {
+        if st < 300 {
+            ok = 1
+            detail = resp
+            return
+        }
+    }
+    detail = "status=" + str(st) + " body=" + resp
+}
+
 // Upsert one text (compat helper).
 func upsert_point(coll, text) (ok, detail) {
     meta := "{\"format\":\"txt\"}"
@@ -92,27 +151,53 @@ func upsert_point(coll, text) (ok, detail) {
     ok, detail = upsert_chunks(coll, cs)
 }
 
-// Batch upsert chunks into a collection.
-func upsert_chunks(coll, chunks) (ok, detail) {
-    eok, edet := ensure_collection(coll)
-    if eok == 0 {
-        ok = 0
-        detail = "ensure_collection: " + edet
-        return
+// Split oversized chunk text so one HTTP JSON body stays UTF-8-safe under MFL.
+func flatten_chunks(chunks) (out) {
+    out = []Chunk{}
+    maxc := cfg_md_max()
+    if maxc < 500 { maxc = 500 }
+    i := 0
+    while i < len(chunks) {
+        c := chunks[i]
+        t := c.text
+        if len(t) <= maxc {
+            out = append(out, c)
+        } else {
+            off := 0
+            part := 0
+            while off < len(t) {
+                end := off + maxc
+                if end > len(t) { end = len(t) }
+                end = utf8_floor(t, end)
+                if end <= off { end = utf8_ceil(t, off + 1) }
+                if end > len(t) { end = len(t) }
+                piece := safe_substr(t, off, end)
+                meta := c.meta
+                if meta == "" { meta = "{}" }
+                if has_suffix(meta, "}") {
+                    meta = substr(meta, 0, len(meta) - 1) + ",\"part\":" + str(part) + "}"
+                }
+                out = append(out, chunk_make(piece, meta))
+                off = end
+                part = part + 1
+            }
+        }
+        i = i + 1
     }
+}
+
+func upsert_chunk_batch(coll, chunks, id_base) (ok, detail, ids) {
     body := "{\"points\":["
     i := 0
-    ids := []int{}
+    ids = []int{}
     while i < len(chunks) {
         c := chunks[i]
         if i > 0 { body = body + "," }
         vec := embed_json(c.text)
-        id := point_id(c.text + "|" + str(i) + "|" + c.meta)
+        id := point_id(c.text + "|" + str(id_base + i) + "|" + c.meta)
         ids = append(ids, id)
-        // merge meta JSON with text field
         payload := c.meta
         if payload == "" { payload = "{}" }
-        // inject text into payload: replace trailing }
         if has_suffix(payload, "}") {
             payload = substr(payload, 0, len(payload) - 1) + ",\"text\":\"" + jesc(c.text) + "\"}"
         } else {
@@ -129,11 +214,54 @@ func upsert_chunks(coll, chunks) (ok, detail) {
     if st >= 200 {
         if st < 300 {
             ok = 1
-            detail = "{\"count\":" + str(len(chunks)) + ",\"ids\":[" + join_ids(ids) + "],\"qdrant\":" + resp + "}"
+            detail = resp
             return
         }
     }
     detail = "status=" + str(st) + " body=" + resp
+}
+
+// Batch upsert chunks into a collection (small HTTP batches — large UTF-8 JSON
+// bodies can corrupt under MFL string concat and Qdrant rejects them).
+func upsert_chunks(coll, chunks) (ok, detail) {
+    eok, edet := ensure_collection(coll)
+    if eok == 0 {
+        ok = 0
+        detail = "ensure_collection: " + edet
+        return
+    }
+    flat := flatten_chunks(chunks)
+    if len(flat) == 0 {
+        ok = 0
+        detail = "no chunks to upsert"
+        return
+    }
+    // One point per HTTP request — safest with UTF-8 under MFL string concat.
+    batch := 1
+    ids := []int{}
+    i := 0
+    last_q := ""
+    while i < len(flat) {
+        end := i + batch
+        if end > len(flat) { end = len(flat) }
+        part := []Chunk{}
+        j := i
+        while j < end {
+            part = append(part, flat[j])
+            j = j + 1
+        }
+        bok, bdet, bids := upsert_chunk_batch(coll, part, i)
+        if bok == 0 {
+            ok = 0
+            detail = "batch@" + str(i) + ": " + bdet
+            return
+        }
+        for _, id := range bids { ids = append(ids, id) }
+        last_q = bdet
+        i = end
+    }
+    ok = 1
+    detail = "{\"count\":" + str(len(flat)) + ",\"ids\":[" + join_ids(ids) + "],\"qdrant\":" + last_q + "}"
 }
 
 func join_ids(ids) (s) {

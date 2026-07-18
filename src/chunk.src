@@ -5,6 +5,56 @@ type Chunk struct {
     meta string
 }
 
+// UTF-8 boundary helpers — MFL len/substr are byte-based; mid-codepoint cuts
+// produce invalid JSON that Qdrant rejects ("invalid unicode code point").
+func utf8_is_cont(b) (y) {
+    y = 0
+    if b >= 128 {
+        if b < 192 { y = 1 }
+    }
+}
+
+func utf8_floor(s, i) (out) {
+    raw := bytes(s)
+    n := len(raw)
+    if i <= 0 { out = 0; return }
+    if i >= n { out = n; return }
+    out = i
+    while out > 0 {
+        if utf8_is_cont(byte_at(raw, out)) == 1 {
+            out = out - 1
+            continue
+        }
+        break
+    }
+}
+
+func utf8_ceil(s, i) (out) {
+    raw := bytes(s)
+    n := len(raw)
+    if i <= 0 { out = 0; return }
+    if i >= n { out = n; return }
+    out = i
+    while out < n {
+        if utf8_is_cont(byte_at(raw, out)) == 1 {
+            out = out + 1
+            continue
+        }
+        break
+    }
+}
+
+func safe_substr(s, start, end) (out) {
+    raw := bytes(s)
+    n := len(raw)
+    if start < 0 { start = 0 }
+    if end > n { end = n }
+    start = utf8_ceil(s, start)
+    end = utf8_floor(s, end)
+    if start > end { start = end }
+    out = substr(s, start, end)
+}
+
 func chunk_make(text, meta) (c) {
     c = Chunk{text: text, meta: meta}
 }
@@ -26,10 +76,193 @@ func ext_of(path) (e) {
 func detect_format(path, override) (fmt) {
     fmt = to_lower(override)
     if fmt != "" { return }
+    pl := to_lower(path)
+    // Phase 0 vision: foo.jpg.md / foo.png.txt → image-caption
+    if has_suffix(pl, ".jpg.md") || has_suffix(pl, ".jpeg.md") || has_suffix(pl, ".png.md") || has_suffix(pl, ".webp.md") {
+        fmt = "image-caption"
+        return
+    }
+    if has_suffix(pl, ".jpg.txt") || has_suffix(pl, ".jpeg.txt") || has_suffix(pl, ".png.txt") || has_suffix(pl, ".webp.txt") {
+        fmt = "image-caption"
+        return
+    }
     fmt = ext_of(path)
     if fmt == "markdown" { fmt = "md" }
     if fmt == "txt" { fmt = "md" }
+    if fmt == "jpeg" { fmt = "jpg" }
     if fmt == "" { fmt = "txt" }
+}
+
+func is_image_format(fmt) (y) {
+    y = 0
+    if fmt == "jpg" || fmt == "png" || fmt == "webp" || fmt == "gif" { y = 1 }
+}
+
+func image_path_from_sidecar(path) (img) {
+    pl := to_lower(path)
+    img = path
+    if has_suffix(pl, ".md") { img = substr(path, 0, len(path) - 3); return }
+    if has_suffix(pl, ".txt") { img = substr(path, 0, len(path) - 4); return }
+}
+
+func find_image_sidecar(path) (side) {
+    side = ""
+    c1 := path + ".md"
+    if read_file(c1) != "" { side = c1; return }
+    c2 := path + ".txt"
+    if read_file(c2) != "" { side = c2; return }
+    // path/foo.jpg → path/foo.md
+    ext := ext_of(path)
+    if ext == "" { return }
+    base := substr(path, 0, len(path) - len(ext) - 1)
+    c3 := base + ".md"
+    if read_file(c3) != "" { side = c3; return }
+    c4 := base + ".txt"
+    if read_file(c4) != "" { side = c4; return }
+}
+
+// Phase 0: caption text → chunk with payload.image (no LLM, no pixels).
+func ingest_image_caption_text(coll, text, image_path, source) (ok, detail) {
+    if trim(text) == "" {
+        ok = 0
+        detail = "empty image caption for " + image_path
+        return
+    }
+    meta := "{\"source\":\"" + jesc(source) + "\",\"format\":\"image-caption\",\"image\":\"" + jesc(image_path) + "\",\"vision\":\"sidecar\"}"
+    // Prefer md sectioning when caption has headings; else one chunk.
+    chunks := parse_md(text, source)
+    if len(chunks) == 0 {
+        chunks = []Chunk{}
+        chunks = append(chunks, chunk_make(trim(text), meta))
+    } else {
+        // stamp image onto each chunk meta
+        stamped := []Chunk{}
+        for _, c := range chunks {
+            m := c.meta
+            if m == "" { m = "{}" }
+            if has_suffix(m, "}") {
+                m = substr(m, 0, len(m) - 1) + ",\"image\":\"" + jesc(image_path) + "\",\"vision\":\"sidecar\",\"format\":\"image-caption\"}"
+            }
+            stamped = append(stamped, chunk_make(c.text, m))
+        }
+        chunks = stamped
+    }
+    ok, detail = upsert_chunks(coll, chunks)
+}
+
+// Phase 0 sidecar, else Phase 1 OCR when ocr.enabled (no LLM).
+func ingest_image_file(coll, path) (ok, detail) {
+    side := find_image_sidecar(path)
+    if side != "" {
+        raw := read_file(side)
+        ok, detail = ingest_image_caption_text(coll, raw, path, side)
+        return
+    }
+    // Phase 1 — local Tesseract
+    if cfg_ocr_enabled() == 0 {
+        ok = 0
+        detail = "image has no sidecar; enable ocr.enabled or add " + path + ".md — docs/vision-path.md"
+        return
+    }
+    if ocr_available() == 0 {
+        ok = 0
+        detail = "image has no sidecar and OCR unavailable (apt install libtesseract4 tesseract-ocr-eng)"
+        return
+    }
+    ook, otext := ocr_file(path)
+    if ook == 0 {
+        ok = 0
+        detail = "OCR failed on " + path
+        return
+    }
+    otext = trim(otext)
+    if otext == "" {
+        // still index filename so photo remains findable by name
+        otext = "[image] " + path + "\n(no OCR text)"
+    } else {
+        otext = "[image] " + path + "\n" + otext
+    }
+    meta := "{\"source\":\"" + jesc(path) + "\",\"format\":\"image-ocr\",\"image\":\"" + jesc(path) + "\",\"vision\":\"ocr\"}"
+    cs := []Chunk{}
+    cs = append(cs, chunk_make(otext, meta))
+    ok, detail = upsert_chunks(coll, cs)
+}
+
+func join_path(dir, name) (p) {
+    if has_suffix(dir, "/") {
+        p = dir + name
+    } else {
+        p = dir + "/" + name
+    }
+}
+
+// Phase 1 folder walk: ingest images (+ sidecars) under dir; skip nested dirs deeper than 1.
+func ingest_dir(coll, dir, depth) (ok, detail) {
+    if depth > 2 {
+        ok = 1
+        detail = "{\"skipped_deep\":true}"
+        return
+    }
+    entries := list_dir(dir)
+    n := 0
+    errs := 0
+    last := ""
+    for _, name := range entries {
+        if name == "" { continue }
+        if has_prefix(name, ".") { continue }
+        // skip sidecar files themselves (ingested via the image)
+        nl := to_lower(name)
+        if has_suffix(nl, ".jpg.md") || has_suffix(nl, ".jpeg.md") || has_suffix(nl, ".png.md") || has_suffix(nl, ".webp.md") { continue }
+        if has_suffix(nl, ".jpg.txt") || has_suffix(nl, ".png.txt") { continue }
+        full := join_path(dir, name)
+        ext := ext_of(full)
+        if ext == "jpeg" { ext = "jpg" }
+        if is_image_format(ext) == 1 {
+            iok, idet := ingest_image_file(coll, full)
+            if iok == 0 {
+                errs = errs + 1
+                last = idet
+            } else {
+                n = n + 1
+            }
+            continue
+        }
+        if path_looks_like_dir(full) == 1 {
+            sok, sdet := ingest_dir(coll, full, depth + 1)
+            if sok == 0 {
+                errs = errs + 1
+                last = sdet
+            } else {
+                n = n + 1
+            }
+        }
+    }
+    if n == 0 {
+        if errs > 0 {
+            ok = 0
+            detail = last
+            return
+        }
+        ok = 0
+        detail = "no images found under " + dir
+        return
+    }
+    ok = 1
+    detail = "{\"dir\":\"" + jesc(dir) + "\",\"images\":" + str(n) + ",\"errors\":" + str(errs) + "}"
+}
+
+func path_looks_like_dir(path) (y) {
+    y = 0
+    if has_suffix(path, "/") { y = 1; return }
+    // file with a known extension → not a dir
+    ext := ext_of(path)
+    if ext == "md" || ext == "txt" || ext == "csv" || ext == "json" || ext == "ndjson" || ext == "docx" || ext == "pdf" { return }
+    if is_image_format(ext) == 1 { return }
+    if ext == "jpeg" { return }
+    // directory if list_dir yields entries (or empty dir with no ext)
+    entries := list_dir(path)
+    if len(entries) > 0 { y = 1; return }
+    if ext == "" { y = 1 }
 }
 
 // Apply declarative normalize.template using {{key}} from meta JSON + {{text}}.
@@ -96,6 +329,10 @@ func ingest_text(coll, text, source, fmt) (ok, detail) {
 }
 
 func ingest_file(coll, path, fmt_override) (ok, detail) {
+    if path_looks_like_dir(path) == 1 {
+        ok, detail = ingest_dir(coll, path, 0)
+        return
+    }
     fmt := detect_format(path, fmt_override)
     if fmt == "docx" {
         ok, detail = ingest_docx(coll, path)
@@ -103,6 +340,21 @@ func ingest_file(coll, path, fmt_override) (ok, detail) {
     }
     if fmt == "pdf" {
         ok, detail = ingest_pdf(coll, path)
+        return
+    }
+    if fmt == "image-caption" {
+        raw := read_file(path)
+        if raw == "" {
+            ok = 0
+            detail = "empty or missing file: " + path
+            return
+        }
+        img := image_path_from_sidecar(path)
+        ok, detail = ingest_image_caption_text(coll, raw, img, path)
+        return
+    }
+    if is_image_format(fmt) == 1 {
+        ok, detail = ingest_image_file(coll, path)
         return
     }
     raw := read_file(path)

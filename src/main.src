@@ -7,19 +7,25 @@ func usage() {
     println("")
     println("commands:")
     println("  status                 qdrant + config (JSON)")
-    println("  collections            list qdrant collections (JSON)")
+    println("  kb list | collections  list knowledge bases (1 Qdrant collection = 1 KB)")
+    println("  kb create -c NAME      create empty knowledge base")
+    println("  kb info -c NAME        collection stats / vectors config")
+    println("  kb delete -c NAME -y   delete knowledge base (requires --yes)")
     println("  ingest -c NAME -t TXT [-format md|csv|json|ndjson|txt|docx|pdf]")
     println("  ingest -c NAME -f PATH [-format …]   parse by extension or -format")
     println("  query  -c NAME -q TXT [-k N]")
+    println("  eval cerise|hash|synonyms   machin-native acceptance suites")
     println("  serve  [-port N]       HTTP API + Vue UI (default :7091)")
     println("  version | help | help-json")
     println("")
+    println("multi-KB: pass a distinct -c name per knowledge base (isolated vectors)")
+    println("images: Phase-0 sidecars foo.jpg.md (no LLM) — docs/vision-path.md")
     println("config: ~/.machin-rag/config.json  then  env  then  CLI")
     println("env: QDRANT_URL | MACHIN_RAG_QDRANT_URL | MACHIN_RAG_FORMAT | PORT")
 }
 
 func help_json() {
-    out_ok("{\"name\":\"machin-rag\",\"version\":\"" + app_version() + "\",\"commands\":[\"status\",\"collections\",\"ingest\",\"query\",\"serve\",\"version\",\"help\",\"help-json\"],\"flags\":{\"-c\":\"collection\",\"-t\":\"text\",\"-f\":\"file\",\"-q\":\"query\",\"-k\":\"top_k\",\"-port\":\"serve port\",\"-format\":\"md|txt|csv|json|ndjson|docx|pdf\"},\"formats\":[\"md\",\"txt\",\"csv\",\"json\",\"ndjson\",\"docx\",\"pdf\"],\"config\":" + cfg_status_json() + ",\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + ",\"qdrant_url\":\"" + jesc(qdrant_url()) + "\"}")
+    out_ok("{\"name\":\"machin-rag\",\"version\":\"" + app_version() + "\",\"commands\":[\"status\",\"kb\",\"collections\",\"ingest\",\"query\",\"eval\",\"serve\",\"version\",\"help\",\"help-json\"],\"eval\":[\"cerise\",\"hash\",\"synonyms\"],\"kb\":[\"list\",\"create\",\"info\",\"delete\"],\"multi_kb\":true,\"kb_model\":\"qdrant-collection-per-kb\",\"flags\":{\"-c\":\"knowledge base / collection\",\"-t\":\"text\",\"-f\":\"file\",\"-q\":\"query\",\"-k\":\"top_k\",\"-port\":\"serve port\",\"-format\":\"md|txt|csv|json|ndjson|docx|pdf|image-caption\",\"-y\":\"confirm destructive\"},\"formats\":[\"md\",\"txt\",\"csv\",\"json\",\"ndjson\",\"docx\",\"pdf\",\"jpg\",\"png\",\"image-caption\"],\"vision\":\"sidecar-phase0\",\"config\":" + cfg_status_json() + ",\"embed\":\"" + embed_provider() + "\",\"dim\":" + str(embed_dim()) + ",\"qdrant_url\":\"" + jesc(qdrant_url()) + "\"}")
 }
 
 func cmd_status() {
@@ -33,6 +39,42 @@ func cmd_collections() {
     ok, detail := list_collections()
     if ok == 0 { out_err(106, "qdrant", detail) }
     out_ok(detail)
+}
+
+func cmd_kb(fs, pos) {
+    sub := "list"
+    if len(pos) > 1 { sub = pos[1] }
+    coll := flag_get(fs, "c")
+    if sub == "list" {
+        cmd_collections()
+        return
+    }
+    if sub == "create" {
+        if coll == "" { out_err(82, "validation", "need -c kb name") }
+        ok, detail := create_kb(coll)
+        if ok == 0 { out_err(106, "qdrant", detail) }
+        out_ok("{\"kb\":\"" + jesc(coll) + "\",\"created\":true,\"qdrant\":" + detail + "}")
+        return
+    }
+    if sub == "info" {
+        if coll == "" { out_err(82, "validation", "need -c kb name") }
+        ok, detail := kb_info(coll)
+        if ok == 0 { out_err(106, "qdrant", detail) }
+        out_ok(detail)
+        return
+    }
+    if sub == "delete" {
+        if coll == "" { out_err(82, "validation", "need -c kb name") }
+        if flag_on(fs, "yes") {
+            ok, detail := delete_kb(coll)
+            if ok == 0 { out_err(106, "qdrant", detail) }
+            out_ok(detail)
+            return
+        }
+        out_err(82, "validation", "destructive: pass -y / --yes")
+        return
+    }
+    out_err(85, "invalid_arg", "kb subcommands: list|create|info|delete (got " + sub + ")")
 }
 
 func cmd_ingest(fs) {
@@ -83,6 +125,10 @@ func make_router() (r) {
     route(r, "GET", "/api/health", func(req) { return handle_health(req) })
     route(r, "GET", "/api/status", func(req) { return handle_status(req) })
     route(r, "GET", "/api/collections", func(req) { return handle_collections(req) })
+    route(r, "GET", "/api/kb", func(req) { return handle_kb_list(req) })
+    route(r, "POST", "/api/kb", func(req) { return handle_kb_create(req) })
+    route(r, "POST", "/api/kb/info", func(req) { return handle_kb_info(req) })
+    route(r, "POST", "/api/kb/delete", func(req) { return handle_kb_delete(req) })
     route(r, "POST", "/api/ingest", func(req) { return handle_ingest(req) })
     route(r, "POST", "/api/query", func(req) { return handle_query(req) })
     route(r, "GET", "/", func(req) { return handle_ui(req) })
@@ -108,7 +154,7 @@ func cmd_serve(fs) {
     r := make_router()
     println("machin-rag serving on http://localhost:" + str(port))
     println("  UI:  http://localhost:" + str(port) + "/")
-    println("  API: /api/health /api/status /api/collections /api/ingest /api/query")
+    println("  API: /api/health /api/status /api/kb /api/collections /api/ingest /api/query")
     println("  Qdrant: " + qdrant_url() + "  embed: " + embed_provider())
     println("  Config: " + cfg_path() + " (" + CFG_SOURCE + ")")
     serve(port, func(req) { return dispatch_rag(r, req) })
@@ -118,7 +164,7 @@ func main() {
     cfg_init()
 
     fs := new_flags("machin-rag")
-    fs = flag_str(fs, "c", "c", "", "collection name")
+    fs = flag_str(fs, "c", "c", "", "knowledge base / collection name")
     fs = flag_str(fs, "t", "t", "", "text to ingest")
     fs = flag_str(fs, "f", "f", "", "file path to ingest")
     fs = flag_str(fs, "q", "q", "", "query text")
@@ -126,6 +172,7 @@ func main() {
     fs = flag_int(fs, "port", "p", "0", "serve port")
     fs = flag_str(fs, "format", "F", "", "force format: md|txt|csv|json|ndjson|docx|pdf")
     fs = flag_str(fs, "qdrant-url", "Q", "", "override Qdrant URL")
+    fs = flag_bool(fs, "yes", "y", "confirm destructive ops (kb delete)")
     fs = parse_flags(fs, args())
 
     // CLI overlays (highest precedence)
@@ -145,8 +192,10 @@ func main() {
 
     if cmd == "status" { cmd_status() }
     if cmd == "collections" { cmd_collections() }
+    if cmd == "kb" { cmd_kb(fs, pos) }
     if cmd == "ingest" { cmd_ingest(fs) }
     if cmd == "query" { cmd_query(fs) }
+    if cmd == "eval" { cmd_eval(pos) }
     if cmd == "serve" { cmd_serve(fs) }
     if cmd == "version" { out_ok("\"" + app_version() + "\"") }
     if cmd == "help-json" { help_json() }

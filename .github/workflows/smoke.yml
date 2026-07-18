@@ -13,7 +13,7 @@ jobs:
       - name: Install runtime deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y libpoppler-cpp0v5 libssl-dev build-essential curl
+          sudo apt-get install -y libpoppler-cpp0v5 libssl-dev build-essential curl jq
 
       - name: Install machin
         run: |
@@ -41,8 +41,11 @@ jobs:
       - name: Smoke
         run: chmod +x scripts/smoke.sh && ./scripts/smoke.sh
 
-      - name: Eval hash + synonyms (report; non-blocking)
-        run: |
-          chmod +x scripts/eval_hash.py scripts/eval_synonyms.py
-          python3 scripts/eval_hash.py || true
-          python3 scripts/eval_synonyms.py || true
+      - name: Eval hash (blocking)
+        run: ./machin-rag eval hash
+
+      - name: Eval cerise (blocking)
+        run: ./machin-rag eval cerise
+
+      - name: Eval synonyms (ONNX signal; non-blocking)
+        run: ./machin-rag eval synonyms || true

@@ -2,6 +2,42 @@
 
 // ---- markdown / plain text ----
 
+// Short standalone lines (ODT/landing copy) → implicit headings.
+// Skips Photo: labels, digit-leading tarifs, list markers, long sentences.
+func is_implicit_heading(t) (y) {
+    y = 0
+    if t == "" { return }
+    if has_prefix(t, "#") { return }
+    if has_prefix(t, "Photo") { return }
+    if has_prefix(t, "http") { return }
+    if has_prefix(t, "-") { return }
+    if has_prefix(t, "*") { return }
+    if has_prefix(t, "•") { return }
+    if has_prefix(t, "…") { return }
+    if has_prefix(t, ".") { return }
+    if len(t) > 48 { return }
+    last := substr(t, len(t) - 1, len(t))
+    if last == "." { return }
+    if last == "?" { return }
+    if last == "!" { return }
+    if last == ":" { return }
+    first := substr(t, 0, 1)
+    if first >= "0" {
+        if first <= "9" { return }
+    }
+    // reject mostly-punctuation / separator lines
+    if index(t, "…") >= 0 { return }
+    if index(t, "---") >= 0 { return }
+    words := 1
+    i := 0
+    while i < len(t) {
+        if substr(t, i, i + 1) == " " { words = words + 1 }
+        i = i + 1
+    }
+    if words > 6 { return }
+    y = 1
+}
+
 func parse_md(raw, source) (chunks) {
     chunks = []Chunk{}
     maxc := cfg_md_max()
@@ -9,10 +45,16 @@ func parse_md(raw, source) (chunks) {
     title := ""
     buf := ""
     n := 0
+    prev_blank := 1
     for _, line := range lines {
         t := trim(line)
         is_h := 0
         if has_prefix(t, "#") { is_h = 1 }
+        if is_h == 0 {
+            if prev_blank == 1 {
+                if is_implicit_heading(t) == 1 { is_h = 1 }
+            }
+        }
         if is_h == 1 {
             if trim(buf) != "" {
                 meta := "{\"source\":\"" + jesc(source) + "\",\"format\":\"md\",\"heading\":\"" + jesc(title) + "\",\"i\":" + str(n) + "}"
@@ -20,23 +62,29 @@ func parse_md(raw, source) (chunks) {
                 n = n + 1
                 buf = ""
             }
-            title = trim(replace(t, "#", ""))
             // strip leading # marks more carefully
             title = t
             while has_prefix(title, "#") { title = trim(substr(title, 1, len(title))) }
             buf = title + "\n"
+            prev_blank = 0
             continue
         }
+        if t == "" { prev_blank = 1 } else { prev_blank = 0 }
         buf = buf + line + "\n"
         if len(buf) >= maxc {
             meta := "{\"source\":\"" + jesc(source) + "\",\"format\":\"md\",\"heading\":\"" + jesc(title) + "\",\"i\":" + str(n) + "}"
             chunks = append(chunks, chunk_make(trim(buf), meta))
             n = n + 1
-            // crude overlap: keep tail
+            // crude overlap: keep tail (UTF-8-safe — never split a codepoint)
             ov := cfg_md_overlap()
             keep := (len(buf) * ov) / 100
             if keep > 0 {
-                if keep < len(buf) { buf = substr(buf, len(buf) - keep, len(buf)) } else { buf = "" }
+                if keep < len(buf) {
+                    start := utf8_ceil(buf, len(buf) - keep)
+                    buf = safe_substr(buf, start, len(buf))
+                } else {
+                    buf = ""
+                }
             } else {
                 buf = ""
             }
